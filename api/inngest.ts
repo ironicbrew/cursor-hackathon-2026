@@ -36,13 +36,20 @@ const profileIngested = inngest.createFunction(
     })
 
     await step.run('generate-embedding', async () => {
-      const { data: profile } = await supabaseAdmin
+      console.log('Generating embedding for user:', userId)
+      
+      const { data: profile, error: profileError } = await supabaseAdmin
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single()
 
-      if (!profile) return
+      console.log('Profile fetched:', profile?.display_name, 'error:', profileError)
+
+      if (!profile) {
+        console.log('No profile found, skipping embedding')
+        return
+      }
 
       const textToEmbed = [
         profile.display_name,
@@ -52,7 +59,12 @@ const profileIngested = inngest.createFunction(
         .filter(Boolean)
         .join(' ')
 
-      if (!textToEmbed.trim()) return
+      console.log('Text to embed:', textToEmbed)
+
+      if (!textToEmbed.trim()) {
+        console.log('No text to embed, skipping')
+        return
+      }
 
       const response = await fetch('https://api.openai.com/v1/embeddings', {
         method: 'POST',
@@ -66,14 +78,20 @@ const profileIngested = inngest.createFunction(
         }),
       })
 
-      const { data } = await response.json()
-      const embedding = data?.[0]?.embedding
+      const result = await response.json()
+      console.log('OpenAI embedding response status:', response.status)
+      
+      const embedding = result.data?.[0]?.embedding
 
       if (embedding) {
-        await supabaseAdmin.rpc('upsert_user_embedding', {
+        console.log('Embedding generated, length:', embedding.length)
+        const { error: upsertError } = await supabaseAdmin.rpc('upsert_user_embedding', {
           p_user_id: userId,
           p_embedding: embedding,
         })
+        console.log('Embedding upsert error:', upsertError)
+      } else {
+        console.error('No embedding in response:', result)
       }
     })
 
@@ -163,13 +181,20 @@ const matchingRun = inngest.createFunction(
     const supabaseAdmin = getSupabaseAdmin()
     const triggeredByUserId = (event.data as { triggeredBy?: string })?.triggeredBy
 
+    console.log('matchingRun started, triggeredBy:', triggeredByUserId)
+
     const matches = await step.run('find-matches', async () => {
-      const { data: users } = await supabaseAdmin
+      const { data: users, error: usersError } = await supabaseAdmin
         .from('profiles')
         .select('id, display_name, headline, location')
         .eq('ingestion_status', 'complete')
 
-      if (!users || users.length < 2) return []
+      console.log('Found users:', users?.length, 'error:', usersError)
+
+      if (!users || users.length < 2) {
+        console.log('Not enough users for matching')
+        return []
+      }
 
       const matchPairs: Array<{
         user1: string
@@ -180,13 +205,15 @@ const matchingRun = inngest.createFunction(
       // Find semantic matches (similarity > 0.7)
       for (let i = 0; i < users.length; i++) {
         for (let j = i + 1; j < users.length; j++) {
-          const { data: similarity } = await supabaseAdmin.rpc(
+          const { data: similarity, error: simError } = await supabaseAdmin.rpc(
             'match_users_by_embedding',
             {
               user_id_1: users[i]!.id,
               user_id_2: users[j]!.id,
             }
           )
+
+          console.log(`Similarity ${users[i]!.id} <-> ${users[j]!.id}: ${similarity}, error:`, simError)
 
           if (similarity && similarity > 0.7) {
             matchPairs.push({
@@ -198,17 +225,24 @@ const matchingRun = inngest.createFunction(
         }
       }
 
+      console.log('Semantic matches found:', matchPairs.length)
+
       // FALLBACK: If the triggering user has no matches, give them a random one
       if (triggeredByUserId) {
         const userHasMatch = matchPairs.some(
           m => m.user1 === triggeredByUserId || m.user2 === triggeredByUserId
         )
 
+        console.log('User has semantic match:', userHasMatch)
+
         if (!userHasMatch) {
           // Find another user to match with (anyone except themselves)
           const otherUsers = users.filter(u => u.id !== triggeredByUserId)
+          console.log('Other users available for fallback:', otherUsers.length)
+          
           if (otherUsers.length > 0) {
             const randomUser = otherUsers[Math.floor(Math.random() * otherUsers.length)]!
+            console.log('Creating fallback match with:', randomUser.id)
             matchPairs.push({
               user1: triggeredByUserId,
               user2: randomUser.id,
@@ -218,6 +252,7 @@ const matchingRun = inngest.createFunction(
         }
       }
 
+      console.log('Total matches to process:', matchPairs.length)
       return matchPairs
     })
 
@@ -279,7 +314,8 @@ Respond in JSON format:
           .single()
 
         if (!existing) {
-          await supabaseAdmin.from('match_suggestions').insert([
+          console.log('Inserting match suggestions for:', match.user1, '<->', match.user2)
+          const { error: insertError } = await supabaseAdmin.from('match_suggestions').insert([
             {
               recipient_id: match.user1,
               matched_user_id: match.user2,
@@ -293,10 +329,19 @@ Respond in JSON format:
               status: 'new',
             },
           ])
+          
+          if (insertError) {
+            console.error('Error inserting match suggestions:', insertError)
+          } else {
+            console.log('Match suggestions inserted successfully')
+          }
+        } else {
+          console.log('Match already exists, skipping')
         }
       })
     }
 
+    console.log('matchingRun completed, matches processed:', matches.length)
     return { matchesFound: matches.length }
   }
 )
