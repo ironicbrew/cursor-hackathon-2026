@@ -18,12 +18,40 @@ function getSupabaseAdmin() {
 const profileIngested = inngest.createFunction(
   { id: 'profile-ingested', triggers: [{ event: 'user/profile.ingested' }] },
   async ({ event, step }) => {
-    const { userId, linkedinData } = event.data as {
+    const { userId, linkedinData, intent } = event.data as {
       userId: string
       linkedinData?: Record<string, unknown>
+      intent?: string
     }
 
     const supabaseAdmin = getSupabaseAdmin()
+
+    // Parse intent string to extract data (format: "focus | Looking for: x | Can offer: y | Location: z")
+    await step.run('update-profile-from-intent', async () => {
+      if (intent) {
+        const parts = intent.split(' | ')
+        const headline = parts[0] || null
+        const locationMatch = parts.find(p => p.startsWith('Location:'))
+        const location = locationMatch ? locationMatch.replace('Location:', '').trim() : null
+
+        console.log('Updating profile with:', { headline, location })
+
+        const { error } = await supabaseAdmin
+          .from('profiles')
+          .update({
+            headline,
+            location,
+            ingestion_status: 'complete',
+          })
+          .eq('id', userId)
+
+        if (error) {
+          console.error('Error updating profile:', error)
+        } else {
+          console.log('Profile updated successfully')
+        }
+      }
+    })
 
     await step.run('store-linkedin-snapshot', async () => {
       if (linkedinData) {
