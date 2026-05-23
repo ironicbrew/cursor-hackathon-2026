@@ -76,9 +76,8 @@ export function Onboarding() {
       }
 
       // Trigger Inngest event for profile processing
-      // This calls our API endpoint which will send the event to Inngest
       try {
-        await fetch('/api/inngest', {
+        const eventResponse = await fetch('/api/send-event', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -89,8 +88,9 @@ export function Onboarding() {
             },
           }),
         })
+        console.log('Inngest event response:', await eventResponse.json())
       } catch (e) {
-        console.log('Inngest event send attempted:', e)
+        console.error('Inngest event send error:', e)
       }
 
     } catch (error) {
