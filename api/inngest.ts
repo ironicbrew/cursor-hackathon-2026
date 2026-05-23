@@ -159,8 +159,9 @@ const intentUpdated = inngest.createFunction(
 
 const matchingRun = inngest.createFunction(
   { id: 'matching-run', triggers: [{ event: 'matching/run' }] },
-  async ({ step }) => {
+  async ({ event, step }) => {
     const supabaseAdmin = getSupabaseAdmin()
+    const triggeredByUserId = (event.data as { triggeredBy?: string })?.triggeredBy
 
     const matches = await step.run('find-matches', async () => {
       const { data: users } = await supabaseAdmin
@@ -176,6 +177,7 @@ const matchingRun = inngest.createFunction(
         similarity: number
       }> = []
 
+      // Find semantic matches (similarity > 0.7)
       for (let i = 0; i < users.length; i++) {
         for (let j = i + 1; j < users.length; j++) {
           const { data: similarity } = await supabaseAdmin.rpc(
@@ -196,6 +198,26 @@ const matchingRun = inngest.createFunction(
         }
       }
 
+      // FALLBACK: If the triggering user has no matches, give them a random one
+      if (triggeredByUserId) {
+        const userHasMatch = matchPairs.some(
+          m => m.user1 === triggeredByUserId || m.user2 === triggeredByUserId
+        )
+
+        if (!userHasMatch) {
+          // Find another user to match with (anyone except themselves)
+          const otherUsers = users.filter(u => u.id !== triggeredByUserId)
+          if (otherUsers.length > 0) {
+            const randomUser = otherUsers[Math.floor(Math.random() * otherUsers.length)]!
+            matchPairs.push({
+              user1: triggeredByUserId,
+              user2: randomUser.id,
+              similarity: 0.5, // Mark as random match
+            })
+          }
+        }
+      }
+
       return matchPairs
     })
 
@@ -210,7 +232,10 @@ const matchingRun = inngest.createFunction(
 
         const [profile1, profile2] = profiles
 
+        const isRandomMatch = match.similarity < 0.7
         const prompt = `You are a professional networking assistant. Based on these two professionals, explain why they should connect and provide conversation starters.
+
+${isRandomMatch ? 'Note: This is an exploratory match to help expand their network beyond their immediate field. Focus on unexpected synergies and cross-industry value.' : 'These professionals have strong profile alignment.'}
 
 Person 1:
 - Name: ${profile1?.display_name}
