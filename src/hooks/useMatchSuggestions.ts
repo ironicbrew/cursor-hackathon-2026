@@ -80,8 +80,7 @@ export function useMatchSuggestions(userId: string | undefined) {
 
   const updateSuggestionStatus = async (
     suggestionId: string,
-    status: 'accepted' | 'declined',
-    reason?: string
+    status: 'accepted' | 'declined'
   ) => {
     const { error: updateError } = await supabase
       .from('match_suggestions')
@@ -89,18 +88,6 @@ export function useMatchSuggestions(userId: string | undefined) {
       .eq('id', suggestionId)
 
     if (updateError) throw updateError
-
-    if (reason) {
-      const { error: feedbackError } = await supabase
-        .from('suggestion_feedback')
-        .insert({
-          suggestion_id: suggestionId,
-          feedback_type: status === 'accepted' ? 'accept' : 'decline',
-          reason_text: reason,
-        })
-
-      if (feedbackError) throw feedbackError
-    }
 
     await fetchSuggestions()
   }

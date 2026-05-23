@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Input } from '@/components/ui/input'
 import { 
   LogOut, 
   Inbox as InboxIcon, 
@@ -16,8 +15,7 @@ import {
   MapPin,
   Briefcase
 } from 'lucide-react'
-import type { MatchSuggestion, Profile } from '@/types/database'
-import type { MatchRationale } from '@/types/matching'
+import type { MatchSuggestion, Profile, MatchRationale } from '@/types/database'
 
 interface SuggestionWithMatch extends MatchSuggestion {
   matched_profile?: Profile | null
@@ -54,12 +52,12 @@ function SuggestionCard({
             </CardTitle>
             <CardDescription className="flex items-center gap-1 truncate">
               <Briefcase className="w-3 h-3" />
-              {profile?.headline ?? 'No headline'}
+              {profile?.prompt_responses?.currentFocus ?? 'No focus set'}
             </CardDescription>
-            {profile?.location && (
+            {profile?.prompt_responses?.location && (
               <CardDescription className="flex items-center gap-1 mt-1">
                 <MapPin className="w-3 h-3" />
-                {profile.location}
+                {profile.prompt_responses.location}
               </CardDescription>
             )}
           </div>
@@ -82,23 +80,12 @@ function SuggestionDetail({
 }: {
   suggestion: SuggestionWithMatch
   onAccept: () => void
-  onDecline: (reason: string) => void
+  onDecline: () => void
   onBack: () => void
 }) {
-  const [showDeclineInput, setShowDeclineInput] = useState(false)
-  const [declineReason, setDeclineReason] = useState('')
-  
   const rationale = suggestion.rationale as MatchRationale
   const profile = suggestion.matched_profile
   const isResolved = suggestion.status !== 'new'
-
-  const handleDecline = () => {
-    if (showDeclineInput && declineReason.trim()) {
-      onDecline(declineReason)
-    } else {
-      setShowDeclineInput(true)
-    }
-  }
 
   return (
     <div className="h-full flex flex-col">
@@ -116,11 +103,11 @@ function SuggestionDetail({
           </Avatar>
           <div>
             <h2 className="text-xl font-semibold text-on-surface">{profile?.display_name}</h2>
-            <p className="text-on-surface-variant">{profile?.headline}</p>
-            {profile?.location && (
+            <p className="text-on-surface-variant">{profile?.prompt_responses?.currentFocus}</p>
+            {profile?.prompt_responses?.location && (
               <p className="text-sm text-on-surface-variant flex items-center gap-1 mt-1">
                 <MapPin className="w-4 h-4" />
-                {profile.location}
+                {profile.prompt_responses.location}
               </p>
             )}
           </div>
@@ -198,35 +185,16 @@ function SuggestionDetail({
 
       {!isResolved && (
         <div className="p-4 border-t border-outline-variant">
-          {showDeclineInput ? (
-            <div className="space-y-2">
-              <p className="text-sm text-on-surface-variant">Why isn't this a good match?</p>
-              <Input
-                value={declineReason}
-                onChange={(e) => setDeclineReason(e.target.value)}
-                placeholder="Help us improve..."
-              />
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowDeclineInput(false)} className="flex-1">
-                  Cancel
-                </Button>
-                <Button variant="destructive" onClick={handleDecline} className="flex-1" disabled={!declineReason.trim()}>
-                  Submit
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleDecline} className="flex-1 gap-2">
-                <X className="w-4 h-4" />
-                Not for me
-              </Button>
-              <Button onClick={onAccept} className="flex-1 gap-2">
-                <Check className="w-4 h-4" />
-                Let's connect!
-              </Button>
-            </div>
-          )}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onDecline} className="flex-1 gap-2">
+              <X className="w-4 h-4" />
+              Not for me
+            </Button>
+            <Button onClick={onAccept} className="flex-1 gap-2">
+              <Check className="w-4 h-4" />
+              Let's connect!
+            </Button>
+          </div>
         </div>
       )}
 
@@ -254,9 +222,9 @@ export function Inbox() {
     await updateSuggestionStatus(selectedId, 'accepted')
   }
 
-  const handleDecline = async (reason: string) => {
+  const handleDecline = async () => {
     if (!selectedId) return
-    await updateSuggestionStatus(selectedId, 'declined', reason)
+    await updateSuggestionStatus(selectedId, 'declined')
   }
 
   if (loading) {

@@ -42,57 +42,42 @@ export function Onboarding() {
 
     const [currentFocus, lookingFor, canOffer, location] = responsesRef.current
 
+    const promptResponses = {
+      currentFocus: currentFocus || '',
+      lookingFor: lookingFor || '',
+      canOffer: canOffer || '',
+      location: location || '',
+    }
+
     try {
-      // Update profile with onboarding data
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          headline: currentFocus || null,
-          location: location || null,
-          ingestion_status: 'complete',
-        })
-        .eq('id', user.id)
-
-      if (profileError) {
-        console.error('Error updating profile:', profileError)
-      }
-
-      // Save the full onboarding context to conversation_threads
-      const { error: threadError } = await supabase
+      // Save conversation thread (optional, for history)
+      await supabase
         .from('conversation_threads')
         .insert({
           user_id: user.id,
           thread_type: 'onboarding',
-          messages: {
-            current_focus: currentFocus,
-            looking_for: lookingFor,
-            can_offer: canOffer,
-            location: location,
+          messages: promptResponses,
+        })
+
+      // Trigger Inngest event - this will save prompt_responses and generate embedding
+      const eventResponse = await fetch('/api/send-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'user/profile.ingested',
+          data: {
+            userId: user.id,
+            promptResponses,
           },
-        })
-
-      if (threadError) {
-        console.error('Error saving thread:', threadError)
+        }),
+      })
+      
+      const result = await eventResponse.json()
+      console.log('Inngest event response:', result)
+      
+      if (!eventResponse.ok) {
+        console.error('Inngest event failed:', result)
       }
-
-      // Trigger Inngest event for profile processing
-      try {
-        const eventResponse = await fetch('/api/send-event', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: 'user/profile.ingested',
-            data: {
-              userId: user.id,
-              intent: `${currentFocus} | Looking for: ${lookingFor} | Can offer: ${canOffer} | Location: ${location}`,
-            },
-          }),
-        })
-        console.log('Inngest event response:', await eventResponse.json())
-      } catch (e) {
-        console.error('Inngest event send error:', e)
-      }
-
     } catch (error) {
       console.error('Error in saveProfileAndTriggerIngestion:', error)
     }

@@ -1,178 +1,188 @@
--- Enable pgvector extension
-create extension if not exists vector;
+-- ===========================================
+-- NETWORTH AI - SIMPLIFIED SCHEMA
+-- Run this in Supabase SQL Editor to wipe and rebuild
+-- ===========================================
 
--- Profiles table
-create table if not exists profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  linkedin_subject text,
+-- Step 1: Drop existing tables (in correct order due to foreign keys)
+DROP TABLE IF EXISTS suggestion_feedback CASCADE;
+DROP TABLE IF EXISTS conversation_threads CASCADE;
+DROP TABLE IF EXISTS match_suggestions CASCADE;
+DROP TABLE IF EXISTS user_embeddings CASCADE;
+DROP TABLE IF EXISTS linkedin_snapshots CASCADE;
+DROP TABLE IF EXISTS profiles CASCADE;
+
+-- Step 2: Drop existing trigger
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS handle_new_user();
+DROP FUNCTION IF EXISTS upsert_user_embedding(uuid, vector);
+DROP FUNCTION IF EXISTS match_users_by_embedding(uuid, uuid);
+
+-- Step 3: Enable pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- ===========================================
+-- TABLE 1: profiles
+-- Stores user info + embedding in one place
+-- ===========================================
+CREATE TABLE profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   display_name text,
-  headline text,
-  location text,
   avatar_url text,
-  ingestion_status text default 'pending' check (ingestion_status in ('pending', 'complete', 'failed')),
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-
--- LinkedIn snapshots
-create table if not exists linkedin_snapshots (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete cascade,
-  snapshot_json jsonb not null,
-  fetched_at timestamptz default now(),
-  api_version text default 'v2',
-  unique(user_id)
-);
-
--- User embeddings for vector search
-create table if not exists user_embeddings (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+  prompt_responses jsonb DEFAULT '{}'::jsonb,
   embedding vector(1536),
-  embedding_model text default 'text-embedding-3-small',
-  updated_at timestamptz default now()
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
--- Create IVFFlat index for fast similarity search
-create index if not exists user_embeddings_embedding_idx 
-  on user_embeddings using ivfflat (embedding vector_cosine_ops) 
-  with (lists = 100);
+-- Index for vector similarity search
+CREATE INDEX IF NOT EXISTS profiles_embedding_idx 
+  ON profiles USING ivfflat (embedding vector_cosine_ops) 
+  WITH (lists = 100);
 
--- Conversation threads
-create table if not exists conversation_threads (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete cascade,
-  thread_type text not null check (thread_type in ('onboarding', 'suggestion')),
-  messages jsonb default '[]'::jsonb,
-  related_suggestion_id uuid,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
+-- ===========================================
+-- TABLE 2: match_suggestions
+-- AI-generated match recommendations
+-- ===========================================
+CREATE TABLE match_suggestions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipient_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  matched_user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  rationale jsonb NOT NULL DEFAULT '{}'::jsonb,
+  status text DEFAULT 'new' CHECK (status IN ('new', 'accepted', 'declined')),
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(recipient_id, matched_user_id)
 );
 
--- Match suggestions
-create table if not exists match_suggestions (
-  id uuid primary key default gen_random_uuid(),
-  recipient_id uuid references auth.users(id) on delete cascade,
-  matched_user_id uuid references auth.users(id) on delete cascade,
-  rationale jsonb not null,
-  status text default 'new' check (status in ('new', 'accepted', 'declined')),
-  created_at timestamptz default now(),
-  updated_at timestamptz default now(),
-  unique(recipient_id, matched_user_id)
+-- ===========================================
+-- TABLE 3: conversation_threads (optional)
+-- For storing chat history
+-- ===========================================
+CREATE TABLE conversation_threads (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  thread_type text NOT NULL CHECK (thread_type IN ('onboarding', 'suggestion')),
+  messages jsonb DEFAULT '[]'::jsonb,
+  created_at timestamptz DEFAULT now()
 );
 
--- Suggestion feedback
-create table if not exists suggestion_feedback (
-  id uuid primary key default gen_random_uuid(),
-  suggestion_id uuid references match_suggestions(id) on delete cascade,
-  feedback_type text not null check (feedback_type in ('accept', 'decline')),
-  reason_text text,
-  created_at timestamptz default now()
-);
+-- ===========================================
+-- ROW LEVEL SECURITY
+-- ===========================================
 
--- RLS Policies
+-- Profiles RLS
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
--- Profiles: users can read/update their own
-alter table profiles enable row level security;
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+CREATE POLICY "Users can view own profile" ON profiles 
+  FOR SELECT USING (auth.uid() = id);
 
-create policy "Users can view own profile"
-  on profiles for select
-  using (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can view other profiles for matching" ON profiles;
+CREATE POLICY "Users can view other profiles for matching" ON profiles 
+  FOR SELECT USING (true);
 
-create policy "Users can update own profile"
-  on profiles for update
-  using (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+CREATE POLICY "Users can update own profile" ON profiles 
+  FOR UPDATE USING (auth.uid() = id);
 
-create policy "Users can insert own profile"
-  on profiles for insert
-  with check (auth.uid() = id);
+DROP POLICY IF EXISTS "Users can insert own profile" ON profiles;
+CREATE POLICY "Users can insert own profile" ON profiles 
+  FOR INSERT WITH CHECK (auth.uid() = id);
 
--- Match suggestions: users can see suggestions where they are the recipient
-alter table match_suggestions enable row level security;
+-- Match suggestions RLS
+ALTER TABLE match_suggestions ENABLE ROW LEVEL SECURITY;
 
-create policy "Users can view their suggestions"
-  on match_suggestions for select
-  using (auth.uid() = recipient_id);
+DROP POLICY IF EXISTS "Users can view their suggestions" ON match_suggestions;
+CREATE POLICY "Users can view their suggestions" ON match_suggestions 
+  FOR SELECT USING (auth.uid() = recipient_id);
 
-create policy "Users can update their suggestions"
-  on match_suggestions for update
-  using (auth.uid() = recipient_id);
+DROP POLICY IF EXISTS "Users can update their suggestions" ON match_suggestions;
+CREATE POLICY "Users can update their suggestions" ON match_suggestions 
+  FOR UPDATE USING (auth.uid() = recipient_id);
 
--- Suggestion feedback: users can insert feedback for their suggestions
-alter table suggestion_feedback enable row level security;
+-- Conversation threads RLS
+ALTER TABLE conversation_threads ENABLE ROW LEVEL SECURITY;
 
-create policy "Users can insert feedback"
-  on suggestion_feedback for insert
-  with check (
-    exists (
-      select 1 from match_suggestions 
-      where id = suggestion_id 
-      and recipient_id = auth.uid()
-    )
-  );
+DROP POLICY IF EXISTS "Users can view own threads" ON conversation_threads;
+CREATE POLICY "Users can view own threads" ON conversation_threads 
+  FOR SELECT USING (auth.uid() = user_id);
 
--- Conversation threads: users can manage their own threads
-alter table conversation_threads enable row level security;
+DROP POLICY IF EXISTS "Users can insert own threads" ON conversation_threads;
+CREATE POLICY "Users can insert own threads" ON conversation_threads 
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
 
-create policy "Users can view own threads"
-  on conversation_threads for select
-  using (auth.uid() = user_id);
+-- ===========================================
+-- GRANTS
+-- ===========================================
+GRANT SELECT, INSERT, UPDATE ON profiles TO authenticated;
+GRANT SELECT ON profiles TO anon;
+GRANT SELECT, INSERT, UPDATE ON match_suggestions TO authenticated;
+GRANT SELECT, INSERT ON conversation_threads TO authenticated;
 
-create policy "Users can insert own threads"
-  on conversation_threads for insert
-  with check (auth.uid() = user_id);
+-- ===========================================
+-- TRIGGER: Auto-create profile on signup
+-- ===========================================
+CREATE OR REPLACE FUNCTION handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.profiles (id, display_name, avatar_url)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'name', NEW.raw_user_meta_data->>'full_name', 'User'),
+    NEW.raw_user_meta_data->>'avatar_url'
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  RAISE LOG 'handle_new_user error for %: %', NEW.id, SQLERRM;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
-create policy "Users can update own threads"
-  on conversation_threads for update
-  using (auth.uid() = user_id);
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
 
--- Enable realtime for match_suggestions
-alter publication supabase_realtime add table match_suggestions;
+-- ===========================================
+-- HELPER FUNCTION: Find similar profiles
+-- ===========================================
+CREATE OR REPLACE FUNCTION find_similar_profiles(
+  target_user_id uuid,
+  similarity_threshold float DEFAULT 0.5,
+  max_results int DEFAULT 10
+)
+RETURNS TABLE (
+  user_id uuid,
+  display_name text,
+  similarity float
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    p.id as user_id,
+    p.display_name,
+    1 - (p.embedding <=> target.embedding) as similarity
+  FROM profiles p
+  CROSS JOIN (SELECT embedding FROM profiles WHERE id = target_user_id) target
+  WHERE p.id != target_user_id
+    AND p.embedding IS NOT NULL
+    AND 1 - (p.embedding <=> target.embedding) > similarity_threshold
+  ORDER BY p.embedding <=> target.embedding
+  LIMIT max_results;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function to upsert user embedding (called from Edge Functions)
-create or replace function upsert_user_embedding(
-  p_user_id uuid,
-  p_embedding vector(1536)
-) returns void as $$
-begin
-  insert into user_embeddings (user_id, embedding, updated_at)
-  values (p_user_id, p_embedding, now())
-  on conflict (user_id)
-  do update set embedding = p_embedding, updated_at = now();
-end;
-$$ language plpgsql security definer;
+-- ===========================================
+-- REALTIME
+-- ===========================================
+ALTER PUBLICATION supabase_realtime ADD TABLE match_suggestions;
 
--- Function to calculate similarity between two users
-create or replace function match_users_by_embedding(
-  user_id_1 uuid,
-  user_id_2 uuid
-) returns float as $$
-declare
-  similarity float;
-begin
-  select 1 - (e1.embedding <=> e2.embedding)
-  into similarity
-  from user_embeddings e1, user_embeddings e2
-  where e1.user_id = user_id_1
-    and e2.user_id = user_id_2;
-  
-  return coalesce(similarity, 0);
-end;
-$$ language plpgsql security definer;
-
--- Trigger to create profile on user signup
-create or replace function handle_new_user()
-returns trigger as $$
-begin
-  insert into profiles (id, display_name, avatar_url)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name'),
-    new.raw_user_meta_data->>'avatar_url'
-  );
-  return new;
-end;
-$$ language plpgsql security definer;
-
-create or replace trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure handle_new_user();
+-- ===========================================
+-- VERIFICATION
+-- ===========================================
+DO $$
+BEGIN
+  RAISE NOTICE 'Schema created successfully!';
+  RAISE NOTICE 'Tables: profiles, match_suggestions, conversation_threads';
+  RAISE NOTICE 'Trigger: on_auth_user_created -> handle_new_user()';
+  RAISE NOTICE 'Function: find_similar_profiles(user_id, threshold, max)';
+END $$;

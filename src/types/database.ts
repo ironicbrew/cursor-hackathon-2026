@@ -6,94 +6,48 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
+export interface PromptResponses {
+  currentFocus: string
+  lookingFor: string
+  canOffer: string
+  location: string
+}
+
+export interface MatchRationale {
+  why: string
+  common_ground: string[]
+  conversation_starters: string[]
+  networking_tips: string[]
+}
+
 export interface Database {
   public: {
     Tables: {
       profiles: {
         Row: {
           id: string
-          linkedin_subject: string | null
           display_name: string | null
-          headline: string | null
-          location: string | null
           avatar_url: string | null
-          ingestion_status: 'pending' | 'complete' | 'failed'
+          prompt_responses: PromptResponses | null
+          embedding: number[] | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id: string
-          linkedin_subject?: string | null
           display_name?: string | null
-          headline?: string | null
-          location?: string | null
           avatar_url?: string | null
-          ingestion_status?: 'pending' | 'complete' | 'failed'
+          prompt_responses?: PromptResponses | null
+          embedding?: number[] | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
-          linkedin_subject?: string | null
           display_name?: string | null
-          headline?: string | null
-          location?: string | null
           avatar_url?: string | null
-          ingestion_status?: 'pending' | 'complete' | 'failed'
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      linkedin_snapshots: {
-        Row: {
-          id: string
-          user_id: string
-          snapshot_json: Json
-          fetched_at: string
-          api_version: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          snapshot_json: Json
-          fetched_at?: string
-          api_version?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          snapshot_json?: Json
-          fetched_at?: string
-          api_version?: string
-        }
-        Relationships: []
-      }
-      conversation_threads: {
-        Row: {
-          id: string
-          user_id: string
-          thread_type: 'onboarding' | 'suggestion'
-          messages: Json
-          related_suggestion_id: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          thread_type: 'onboarding' | 'suggestion'
-          messages?: Json
-          related_suggestion_id?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          thread_type?: 'onboarding' | 'suggestion'
-          messages?: Json
-          related_suggestion_id?: string | null
+          prompt_responses?: PromptResponses | null
+          embedding?: number[] | null
           created_at?: string
           updated_at?: string
         }
@@ -104,58 +58,68 @@ export interface Database {
           id: string
           recipient_id: string
           matched_user_id: string
-          rationale: Json
+          rationale: MatchRationale
           status: 'new' | 'accepted' | 'declined'
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
           recipient_id: string
           matched_user_id: string
-          rationale: Json
+          rationale: MatchRationale | Json
           status?: 'new' | 'accepted' | 'declined'
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
           recipient_id?: string
           matched_user_id?: string
-          rationale?: Json
+          rationale?: MatchRationale | Json
           status?: 'new' | 'accepted' | 'declined'
           created_at?: string
-          updated_at?: string
         }
         Relationships: []
       }
-      suggestion_feedback: {
+      conversation_threads: {
         Row: {
           id: string
-          suggestion_id: string
-          feedback_type: 'accept' | 'decline'
-          reason_text: string | null
+          user_id: string
+          thread_type: 'onboarding' | 'suggestion'
+          messages: Json
           created_at: string
         }
         Insert: {
           id?: string
-          suggestion_id: string
-          feedback_type: 'accept' | 'decline'
-          reason_text?: string | null
+          user_id: string
+          thread_type: 'onboarding' | 'suggestion'
+          messages?: Json
           created_at?: string
         }
         Update: {
           id?: string
-          suggestion_id?: string
-          feedback_type?: 'accept' | 'decline'
-          reason_text?: string | null
+          user_id?: string
+          thread_type?: 'onboarding' | 'suggestion'
+          messages?: Json
           created_at?: string
         }
         Relationships: []
       }
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      find_similar_profiles: {
+        Args: {
+          target_user_id: string
+          similarity_threshold?: number
+          max_results?: number
+        }
+        Returns: {
+          user_id: string
+          display_name: string
+          similarity: number
+        }[]
+      }
+    }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>
   }
