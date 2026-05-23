@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -32,6 +33,70 @@ export function Onboarding() {
   const [input, setInput] = useState('')
   const [questionIndex, setQuestionIndex] = useState(0)
   const [isTyping, setIsTyping] = useState(false)
+  
+  // Store user responses
+  const responsesRef = useRef<string[]>([])
+
+  const saveProfileAndTriggerIngestion = async () => {
+    if (!user?.id) return
+
+    const [currentFocus, lookingFor, canOffer, location] = responsesRef.current
+
+    try {
+      // Update profile with onboarding data
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          headline: currentFocus || null,
+          location: location || null,
+          ingestion_status: 'complete',
+        })
+        .eq('id', user.id)
+
+      if (profileError) {
+        console.error('Error updating profile:', profileError)
+      }
+
+      // Save the full onboarding context to conversation_threads
+      const { error: threadError } = await supabase
+        .from('conversation_threads')
+        .insert({
+          user_id: user.id,
+          thread_type: 'onboarding',
+          messages: {
+            current_focus: currentFocus,
+            looking_for: lookingFor,
+            can_offer: canOffer,
+            location: location,
+          },
+        })
+
+      if (threadError) {
+        console.error('Error saving thread:', threadError)
+      }
+
+      // Trigger Inngest event for profile processing
+      // This calls our API endpoint which will send the event to Inngest
+      try {
+        await fetch('/api/inngest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'user/profile.ingested',
+            data: {
+              userId: user.id,
+              intent: `${currentFocus} | Looking for: ${lookingFor} | Can offer: ${canOffer} | Location: ${location}`,
+            },
+          }),
+        })
+      } catch (e) {
+        console.log('Inngest event send attempted:', e)
+      }
+
+    } catch (error) {
+      console.error('Error in saveProfileAndTriggerIngestion:', error)
+    }
+  }
 
   const handleSend = async () => {
     if (!input.trim()) return
@@ -42,6 +107,9 @@ export function Onboarding() {
       content: input,
       timestamp: new Date().toISOString(),
     }
+
+    // Store the response
+    responsesRef.current[questionIndex] = input
 
     setMessages(prev => [...prev, userMessage])
     setInput('')
@@ -62,6 +130,9 @@ export function Onboarding() {
       setMessages(prev => [...prev, assistantMessage])
       setQuestionIndex(nextIndex)
     } else {
+      // All questions answered - save to database
+      await saveProfileAndTriggerIngestion()
+      
       const completionMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
