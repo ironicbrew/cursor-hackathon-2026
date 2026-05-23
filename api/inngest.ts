@@ -84,6 +84,12 @@ const profileIngested = inngest.createFunction(
         .eq('id', userId)
     })
 
+    // Trigger matching run after profile is ingested
+    await step.sendEvent('trigger-matching', {
+      name: 'matching/run',
+      data: { triggeredBy: userId },
+    })
+
     return { success: true }
   }
 )
@@ -139,6 +145,12 @@ const intentUpdated = inngest.createFunction(
           p_embedding: embedding,
         })
       }
+    })
+
+    // Trigger matching run after intent is updated
+    await step.sendEvent('trigger-matching', {
+      name: 'matching/run',
+      data: { triggeredBy: userId },
     })
 
     return { success: true }
