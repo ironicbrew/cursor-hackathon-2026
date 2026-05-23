@@ -20,7 +20,7 @@ import type { MatchSuggestion, Profile } from '@/types/database'
 import type { MatchRationale } from '@/types/matching'
 
 interface SuggestionWithMatch extends MatchSuggestion {
-  matched_profile?: Profile
+  matched_profile?: Profile | null
 }
 
 function SuggestionCard({ 
