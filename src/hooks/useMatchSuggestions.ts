@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 import type { MatchSuggestion, Profile } from '@/types/database'
 
 interface SuggestionWithMatch extends MatchSuggestion {
-  matched_profile?: Profile
+  matched_profile?: Profile | null
 }
 
 export function useMatchSuggestions(userId: string | undefined) {
@@ -11,20 +11,44 @@ export function useMatchSuggestions(userId: string | undefined) {
   const [loading, setLoading] = useState(true)
 
   const fetchSuggestions = useCallback(async () => {
-    if (!userId) return
-
-    const { data, error } = await supabase
-      .from('match_suggestions')
-      .select('*, matched_profile:profiles!match_suggestions_matched_user_id_fkey(*)')
-      .eq('recipient_id', userId)
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching suggestions:', error)
+    if (!userId) {
+      setLoading(false)
       return
     }
 
-    setSuggestions(data as unknown as SuggestionWithMatch[])
+    // Fetch suggestions first
+    const { data: suggestionsData, error: suggestionsError } = await supabase
+      .from('match_suggestions')
+      .select('*')
+      .eq('recipient_id', userId)
+      .order('created_at', { ascending: false })
+
+    if (suggestionsError) {
+      console.error('Error fetching suggestions:', suggestionsError)
+      setLoading(false)
+      return
+    }
+
+    if (!suggestionsData || suggestionsData.length === 0) {
+      setSuggestions([])
+      setLoading(false)
+      return
+    }
+
+    // Fetch matched profiles separately
+    const matchedUserIds = suggestionsData.map(s => s.matched_user_id)
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('id', matchedUserIds)
+
+    // Combine suggestions with profiles
+    const suggestionsWithProfiles = suggestionsData.map(suggestion => ({
+      ...suggestion,
+      matched_profile: profilesData?.find(p => p.id === suggestion.matched_user_id) || null,
+    }))
+
+    setSuggestions(suggestionsWithProfiles)
     setLoading(false)
   }, [userId])
 

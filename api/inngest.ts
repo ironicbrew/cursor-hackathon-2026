@@ -1,4 +1,4 @@
-import { serve } from 'inngest/vercel'
+import { serve } from 'inngest/next'
 import { Inngest } from 'inngest'
 import { createClient } from '@supabase/supabase-js'
 
@@ -16,8 +16,7 @@ function getSupabaseAdmin() {
 }
 
 const profileIngested = inngest.createFunction(
-  { id: 'profile-ingested' },
-  { event: 'user/profile.ingested' },
+  { id: 'profile-ingested', triggers: [{ event: 'user/profile.ingested' }] },
   async ({ event, step }) => {
     const { userId, linkedinData } = event.data as {
       userId: string
@@ -90,8 +89,7 @@ const profileIngested = inngest.createFunction(
 )
 
 const intentUpdated = inngest.createFunction(
-  { id: 'intent-updated' },
-  { event: 'user/intent.updated' },
+  { id: 'intent-updated', triggers: [{ event: 'user/intent.updated' }] },
   async ({ event, step }) => {
     const { userId, intent } = event.data as {
       userId: string
@@ -148,8 +146,7 @@ const intentUpdated = inngest.createFunction(
 )
 
 const matchingRun = inngest.createFunction(
-  { id: 'matching-run' },
-  { event: 'matching/run' },
+  { id: 'matching-run', triggers: [{ event: 'matching/run' }] },
   async ({ step }) => {
     const supabaseAdmin = getSupabaseAdmin()
 
@@ -266,6 +263,8 @@ Respond in JSON format:
     return { matchesFound: matches.length }
   }
 )
+
+export const maxDuration = 60
 
 export default serve({
   client: inngest,
