@@ -3,10 +3,9 @@ import { supabase } from '@/lib/supabase'
 import { formatSupabaseError } from '@/lib/api-errors'
 import {
   buildTemplateRationale,
-  readLocalMatchStatus,
-  writeLocalMatchStatus,
+  ensureMinConversationStarters,
 } from '@/lib/match-rationale'
-import type { MatchSuggestion, Profile } from '@/types/database'
+import type { MatchRationale, MatchSuggestion, Profile } from '@/types/database'
 
 export interface SuggestionWithMatch extends MatchSuggestion {
   matched_profile?: Profile | null
@@ -67,28 +66,36 @@ export function useMatchSuggestions(userId: string | undefined) {
     const savedByMatchId = new Map(
       (savedSuggestions ?? []).map(s => [s.matched_user_id, s])
     )
-    const localStatus = readLocalMatchStatus(userId)
 
     const merged: SuggestionWithMatch[] = (allProfiles ?? []).map(profile => {
       const saved = savedByMatchId.get(profile.id)
 
       if (saved) {
+        const rationale = saved.rationale as MatchRationale
         return {
           ...saved,
+          rationale: {
+            ...rationale,
+            conversation_starters: ensureMinConversationStarters(
+              rationale.conversation_starters,
+              viewerProfile,
+              profile,
+              rationale.suggested_message
+            ),
+          },
           matched_profile: profile,
           synthetic: false,
         }
       }
 
       const rationale = buildTemplateRationale(viewerProfile, profile)
-      const status = localStatus[profile.id] ?? 'new'
 
       return {
         id: `synthetic-${profile.id}`,
         recipient_id: userId,
         matched_user_id: profile.id,
         rationale,
-        status,
+        status: 'new',
         created_at: profile.created_at,
         matched_profile: profile,
         synthetic: true,
@@ -129,36 +136,10 @@ export function useMatchSuggestions(userId: string | undefined) {
     }
   }, [userId, fetchSuggestions])
 
-  const updateSuggestionStatus = async (
-    suggestionId: string,
-    status: 'accepted' | 'declined'
-  ) => {
-    const suggestion = suggestions.find(s => s.id === suggestionId)
-    if (!suggestion || !userId) return
-
-    if (suggestion.synthetic) {
-      writeLocalMatchStatus(userId, suggestion.matched_user_id, status)
-      setSuggestions(prev =>
-        prev.map(s => (s.id === suggestionId ? { ...s, status } : s))
-      )
-      return
-    }
-
-    const { error: updateError } = await supabase
-      .from('match_suggestions')
-      .update({ status })
-      .eq('id', suggestionId)
-
-    if (updateError) throw updateError
-
-    await fetchSuggestions()
-  }
-
   return {
     suggestions,
     loading,
     error,
-    updateSuggestionStatus,
     refetch: fetchSuggestions,
   }
 }

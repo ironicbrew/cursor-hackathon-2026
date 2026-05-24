@@ -79,18 +79,13 @@ function SuggestionCard({
 
 function SuggestionDetail({
   suggestion,
-  onAccept,
-  onDecline,
   onBack,
 }: {
   suggestion: SuggestionWithMatch
-  onAccept: () => void
-  onDecline: () => void
   onBack: () => void
 }) {
   const rationale = suggestion.rationale as MatchRationale
   const profile = suggestion.matched_profile
-  const isResolved = suggestion.status !== 'new'
   const suggestedMessage =
     rationale?.suggested_message ?? rationale?.conversation_starters?.[0]
 
@@ -167,7 +162,7 @@ function SuggestionDetail({
             </Card>
           )}
 
-          {rationale?.conversation_starters && rationale.conversation_starters.length > 0 && (
+          {rationale?.conversation_starters && rationale.conversation_starters.length >= 3 && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -204,49 +199,29 @@ function SuggestionDetail({
         </div>
       </ScrollArea>
 
-      {!isResolved && (
-        <div className="p-4 border-t border-outline-variant">
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onDecline} className="flex-1 gap-2">
-              <X className="w-4 h-4" />
-              Not for me
-            </Button>
-            <Button onClick={onAccept} className="flex-1 gap-2">
-              <Check className="w-4 h-4" />
-              Let's connect!
-            </Button>
-          </div>
+      <div className="p-4 border-t border-outline-variant">
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" className="flex-1 gap-2">
+            <X className="w-4 h-4" />
+            Not for me
+          </Button>
+          <Button type="button" className="flex-1 gap-2">
+            <Check className="w-4 h-4" />
+            Let&apos;s connect!
+          </Button>
         </div>
-      )}
-
-      {isResolved && (
-        <div className="p-4 border-t border-outline-variant">
-          <p className={`text-center ${suggestion.status === 'accepted' ? 'text-primary' : 'text-on-surface-variant'}`}>
-            {suggestion.status === 'accepted' ? '✓ You accepted this connection' : '✗ You passed on this one'}
-          </p>
-        </div>
-      )}
+      </div>
     </div>
   )
 }
 
 export function Inbox() {
   const { user, signOut } = useAuth()
-  const { suggestions, loading, error, updateSuggestionStatus } = useMatchSuggestions(user?.id)
+  const { suggestions, loading, error } = useMatchSuggestions(user?.id)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const selectedSuggestion = suggestions.find(s => s.id === selectedId)
   const newCount = suggestions.filter(s => s.status === 'new').length
-
-  const handleAccept = async () => {
-    if (!selectedId) return
-    await updateSuggestionStatus(selectedId, 'accepted')
-  }
-
-  const handleDecline = async () => {
-    if (!selectedId) return
-    await updateSuggestionStatus(selectedId, 'declined')
-  }
 
   if (loading) {
     return (
@@ -312,8 +287,6 @@ export function Inbox() {
         {selectedSuggestion ? (
           <SuggestionDetail
             suggestion={selectedSuggestion}
-            onAccept={handleAccept}
-            onDecline={handleDecline}
             onBack={() => setSelectedId(null)}
           />
         ) : (

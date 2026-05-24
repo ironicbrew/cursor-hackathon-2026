@@ -38,6 +38,100 @@ function firstName(displayName: string | null | undefined): string {
   return displayName?.trim().split(/\s+/)[0] || 'there'
 }
 
+function addUniqueStarters(starters: string[], ...candidates: (string | undefined)[]) {
+  for (const candidate of candidates) {
+    const text = candidate?.trim()
+    if (text && !starters.includes(text)) starters.push(text)
+  }
+}
+
+function buildConversationStarters(
+  viewer: MatchProfile,
+  matched: MatchProfile,
+  suggested_message: string
+): string[] {
+  const name = firstName(matched.display_name)
+  const responses = matched.prompt_responses
+  const focus = responses?.currentFocus?.trim()
+  const lookingFor = responses?.lookingFor?.trim()
+  const canOffer = responses?.canOffer?.trim()
+  const location = responses?.location?.trim()
+  const viewerFocus = viewer.prompt_responses?.currentFocus?.trim()
+  const viewerOffer = viewer.prompt_responses?.canOffer?.trim()
+
+  const starters: string[] = []
+  addUniqueStarters(starters, suggested_message)
+
+  if (focus) {
+    addUniqueStarters(
+      starters,
+      `What's been the most interesting part of ${focus} for you lately?`,
+      `I'd love to hear what you're figuring out with ${focus} right now.`
+    )
+  }
+  if (lookingFor) {
+    addUniqueStarters(
+      starters,
+      `What kind of people would be most helpful for you around ${lookingFor}?`
+    )
+  }
+  if (canOffer) {
+    addUniqueStarters(
+      starters,
+      `Your background in ${canOffer} sounds really useful — would love to learn more.`
+    )
+  }
+  if (location) {
+    addUniqueStarters(
+      starters,
+      `Are you connecting with people in ${location} locally or mostly online?`
+    )
+  }
+  if (viewerFocus) {
+    addUniqueStarters(
+      starters,
+      `I'm working on ${viewerFocus} — curious if that overlaps with anything you're exploring.`
+    )
+  }
+  if (viewerOffer) {
+    addUniqueStarters(
+      starters,
+      `Happy to share what I know about ${viewerOffer} if it might be useful for you.`
+    )
+  }
+
+  addUniqueStarters(
+    starters,
+    `What's on your mind professionally these days, ${name}?`,
+    `Would you be up for a quick intro chat sometime this week, ${name}?`,
+    `Hi ${name}! I'd love to connect and hear what brought you here.`
+  )
+
+  while (starters.length < 3) {
+    addUniqueStarters(starters, suggested_message, `Hey ${name}! Would love to connect.`)
+  }
+
+  return starters
+}
+
+function ensureMinConversationStarters(
+  starters: string[] | undefined,
+  suggestedMessage: string,
+  fallbackStarters: string[]
+): string[] {
+  const merged: string[] = []
+  addUniqueStarters(merged, suggestedMessage)
+  for (const starter of starters ?? []) addUniqueStarters(merged, starter)
+  for (const starter of fallbackStarters) {
+    addUniqueStarters(merged, starter)
+    if (merged.length >= 3) break
+  }
+  while (merged.length < 3 && fallbackStarters.length > 0) {
+    addUniqueStarters(merged, fallbackStarters[merged.length % fallbackStarters.length])
+  }
+  return merged
+}
+
 export function buildTemplateRationale(viewer: MatchProfile, matched: MatchProfile): MatchRationale {
   const name = firstName(matched.display_name)
   const responses = matched.prompt_responses
@@ -73,7 +167,7 @@ export function buildTemplateRationale(viewer: MatchProfile, matched: MatchProfi
     why,
     suggested_message,
     common_ground,
-    conversation_starters: [suggested_message],
+    conversation_starters: buildConversationStarters(viewer, matched, suggested_message),
     networking_tips: ['Lead with curiosity about what they shared in their profile.'],
   }
 }
@@ -102,7 +196,7 @@ Respond in JSON:
   "why": "One sentence on why Person A should connect with Person B",
   "suggested_message": "A ready-to-send first message from Person A to Person B (1-2 sentences, warm and specific)",
   "common_ground": ["shared angle 1"],
-  "conversation_starters": ["another opener option"],
+  "conversation_starters": ["opener 1", "opener 2", "opener 3"],
   "networking_tips": ["one practical tip"]
 }`
 
@@ -128,14 +222,17 @@ Respond in JSON:
 
     const parsed = JSON.parse(aiResult.choices?.[0]?.message?.content || '{}') as Partial<MatchRationale>
     const template = buildTemplateRationale(viewer, matched)
+    const suggested_message = parsed.suggested_message || template.suggested_message
 
     return {
       why: parsed.why || template.why,
-      suggested_message: parsed.suggested_message || template.suggested_message,
+      suggested_message,
       common_ground: parsed.common_ground?.length ? parsed.common_ground : template.common_ground,
-      conversation_starters: parsed.conversation_starters?.length
-        ? parsed.conversation_starters
-        : [parsed.suggested_message || template.suggested_message],
+      conversation_starters: ensureMinConversationStarters(
+        parsed.conversation_starters,
+        suggested_message,
+        template.conversation_starters
+      ),
       networking_tips: parsed.networking_tips?.length ? parsed.networking_tips : template.networking_tips,
     }
   } catch (error) {

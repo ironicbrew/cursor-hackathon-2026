@@ -14,6 +14,106 @@ function hasPromptData(responses: PromptResponses | null | undefined): boolean {
   )
 }
 
+function addUniqueStarters(starters: string[], ...candidates: (string | undefined)[]) {
+  for (const candidate of candidates) {
+    const text = candidate?.trim()
+    if (text && !starters.includes(text)) starters.push(text)
+  }
+}
+
+function buildConversationStarters(
+  viewer: Profile,
+  matched: Profile,
+  suggested_message: string
+): string[] {
+  const name = firstName(matched.display_name)
+  const responses = matched.prompt_responses
+  const focus = responses?.currentFocus?.trim()
+  const lookingFor = responses?.lookingFor?.trim()
+  const canOffer = responses?.canOffer?.trim()
+  const location = responses?.location?.trim()
+  const viewerFocus = viewer.prompt_responses?.currentFocus?.trim()
+  const viewerOffer = viewer.prompt_responses?.canOffer?.trim()
+
+  const starters: string[] = []
+  addUniqueStarters(starters, suggested_message)
+
+  if (focus) {
+    addUniqueStarters(
+      starters,
+      `What's been the most interesting part of ${focus} for you lately?`,
+      `I'd love to hear what you're figuring out with ${focus} right now.`
+    )
+  }
+  if (lookingFor) {
+    addUniqueStarters(
+      starters,
+      `What kind of people would be most helpful for you around ${lookingFor}?`
+    )
+  }
+  if (canOffer) {
+    addUniqueStarters(
+      starters,
+      `Your background in ${canOffer} sounds really useful — would love to learn more.`
+    )
+  }
+  if (location) {
+    addUniqueStarters(
+      starters,
+      `Are you connecting with people in ${location} locally or mostly online?`
+    )
+  }
+  if (viewerFocus) {
+    addUniqueStarters(
+      starters,
+      `I'm working on ${viewerFocus} — curious if that overlaps with anything you're exploring.`
+    )
+  }
+  if (viewerOffer) {
+    addUniqueStarters(
+      starters,
+      `Happy to share what I know about ${viewerOffer} if it might be useful for you.`
+    )
+  }
+
+  addUniqueStarters(
+    starters,
+    `What's on your mind professionally these days, ${name}?`,
+    `Would you be up for a quick intro chat sometime this week, ${name}?`,
+    `Hi ${name}! I'd love to connect and hear what brought you here.`
+  )
+
+  while (starters.length < 3) {
+    addUniqueStarters(starters, suggested_message, `Hey ${name}! Would love to connect.`)
+  }
+
+  return starters
+}
+
+export function ensureMinConversationStarters(
+  starters: string[] | undefined,
+  viewer: Profile,
+  matched: Profile,
+  suggestedMessage?: string
+): string[] {
+  const template = buildTemplateRationale(viewer, matched)
+  const primary = suggestedMessage?.trim() || template.suggested_message
+  const merged: string[] = []
+
+  addUniqueStarters(merged, primary)
+  for (const starter of starters ?? []) addUniqueStarters(merged, starter)
+  for (const starter of template.conversation_starters) {
+    addUniqueStarters(merged, starter)
+    if (merged.length >= 3) break
+  }
+
+  while (merged.length < 3) {
+    addUniqueStarters(merged, template.conversation_starters[merged.length % template.conversation_starters.length])
+  }
+
+  return merged
+}
+
 export function buildTemplateRationale(viewer: Profile, matched: Profile): MatchRationale {
   const name = firstName(matched.display_name)
   const responses = matched.prompt_responses
@@ -52,31 +152,9 @@ export function buildTemplateRationale(viewer: Profile, matched: Profile): Match
     why,
     suggested_message,
     common_ground,
-    conversation_starters: [suggested_message],
+    conversation_starters: buildConversationStarters(viewer, matched, suggested_message),
     networking_tips: hasPromptData(matched.prompt_responses)
       ? ['Lead with curiosity about what they shared in their profile.']
       : ['Ask what they are working on — they may still be setting up their profile.'],
   }
-}
-
-export function localStatusKey(userId: string): string {
-  return `networth_match_status_${userId}`
-}
-
-export function readLocalMatchStatus(userId: string): Record<string, 'accepted' | 'declined'> {
-  try {
-    return JSON.parse(localStorage.getItem(localStatusKey(userId)) ?? '{}')
-  } catch {
-    return {}
-  }
-}
-
-export function writeLocalMatchStatus(
-  userId: string,
-  matchedUserId: string,
-  status: 'accepted' | 'declined'
-): void {
-  const all = readLocalMatchStatus(userId)
-  all[matchedUserId] = status
-  localStorage.setItem(localStatusKey(userId), JSON.stringify(all))
 }
