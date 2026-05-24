@@ -127,8 +127,22 @@ BEGIN
   INSERT INTO public.profiles (id, display_name, avatar_url)
   VALUES (
     NEW.id,
-    COALESCE(NEW.raw_user_meta_data->>'name', NEW.raw_user_meta_data->>'full_name', 'User'),
-    NEW.raw_user_meta_data->>'avatar_url'
+    COALESCE(
+      NEW.raw_user_meta_data->>'name',
+      NEW.raw_user_meta_data->>'full_name',
+      NULLIF(TRIM(CONCAT(
+        NEW.raw_user_meta_data->>'given_name',
+        ' ',
+        NEW.raw_user_meta_data->>'family_name'
+      )), ''),
+      split_part(NEW.email, '@', 1),
+      'User'
+    ),
+    COALESCE(
+      NEW.raw_user_meta_data->>'avatar_url',
+      NEW.raw_user_meta_data->>'picture',
+      NEW.raw_user_meta_data->>'avatar'
+    )
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
@@ -136,7 +150,7 @@ EXCEPTION WHEN OTHERS THEN
   RAISE LOG 'handle_new_user error for %: %', NEW.id, SQLERRM;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users

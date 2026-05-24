@@ -1,36 +1,34 @@
 import { useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
-import { useMatchSuggestions } from '@/hooks/useMatchSuggestions'
+import { useMatchSuggestions, type SuggestionWithMatch } from '@/hooks/useMatchSuggestions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { 
-  LogOut, 
-  Inbox as InboxIcon, 
-  Sparkles, 
-  Check, 
-  X, 
+import {
+  LogOut,
+  Inbox as InboxIcon,
+  Sparkles,
+  Check,
+  X,
   MessageSquare,
   MapPin,
-  Briefcase
+  Briefcase,
 } from 'lucide-react'
-import type { MatchSuggestion, Profile, MatchRationale } from '@/types/database'
+import type { MatchRationale } from '@/types/database'
 
-interface SuggestionWithMatch extends MatchSuggestion {
-  matched_profile?: Profile | null
-}
-
-function SuggestionCard({ 
-  suggestion, 
-  onSelect 
-}: { 
+function SuggestionCard({
+  suggestion,
+  onSelect,
+}: {
   suggestion: SuggestionWithMatch
-  onSelect: () => void 
+  onSelect: () => void
 }) {
   const rationale = suggestion.rationale as MatchRationale
   const profile = suggestion.matched_profile
   const isNew = suggestion.status === 'new'
+  const suggestedMessage =
+    rationale?.suggested_message ?? rationale?.conversation_starters?.[0]
 
   return (
     <Card 
@@ -51,8 +49,8 @@ function SuggestionCard({
               {isNew && <span className="ml-2 text-xs bg-primary text-on-primary px-2 py-0.5 rounded-full">New</span>}
             </CardTitle>
             <CardDescription className="flex items-center gap-1 truncate">
-              <Briefcase className="w-3 h-3" />
-              {profile?.prompt_responses?.currentFocus ?? 'No focus set'}
+              <Briefcase className="w-3 h-3 shrink-0" />
+              {profile?.prompt_responses?.currentFocus?.trim() || 'New network member'}
             </CardDescription>
             {profile?.prompt_responses?.location && (
               <CardDescription className="flex items-center gap-1 mt-1">
@@ -64,9 +62,16 @@ function SuggestionCard({
         </div>
       </CardHeader>
       <CardContent>
-        <p className="text-sm text-on-surface-variant line-clamp-2">
-          {rationale?.why ?? 'AI match suggestion'}
-        </p>
+        {suggestedMessage ? (
+          <p className="text-sm text-on-surface line-clamp-2">
+            <span className="text-on-surface-variant">Suggested: </span>
+            &ldquo;{suggestedMessage}&rdquo;
+          </p>
+        ) : (
+          <p className="text-sm text-on-surface-variant line-clamp-2">
+            {rationale?.why ?? 'Say hello and introduce yourself.'}
+          </p>
+        )}
       </CardContent>
     </Card>
   )
@@ -86,6 +91,8 @@ function SuggestionDetail({
   const rationale = suggestion.rationale as MatchRationale
   const profile = suggestion.matched_profile
   const isResolved = suggestion.status !== 'new'
+  const suggestedMessage =
+    rationale?.suggested_message ?? rationale?.conversation_starters?.[0]
 
   return (
     <div className="h-full flex flex-col">
@@ -116,6 +123,20 @@ function SuggestionDetail({
 
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-6">
+          {suggestedMessage && (
+            <Card className="border-primary/30 bg-primary-container/30">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <MessageSquare className="w-5 h-5 text-primary" />
+                  Suggested Message
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-on-surface">&ldquo;{suggestedMessage}&rdquo;</p>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -211,7 +232,7 @@ function SuggestionDetail({
 
 export function Inbox() {
   const { user, signOut } = useAuth()
-  const { suggestions, loading, updateSuggestionStatus } = useMatchSuggestions(user?.id)
+  const { suggestions, loading, error, updateSuggestionStatus } = useMatchSuggestions(user?.id)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const selectedSuggestion = suggestions.find(s => s.id === selectedId)
@@ -258,11 +279,20 @@ export function Inbox() {
 
         <ScrollArea className="flex-1">
           <div className="p-4 space-y-3">
-            {suggestions.length === 0 ? (
+            {error && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-on-surface">
+                <p className="font-medium">Could not load matches</p>
+                <p className="mt-1">{error.message}</p>
+                {error.hint && <p className="mt-1 text-on-surface-variant">Hint: {error.hint}</p>}
+                {error.details && <p className="mt-1 text-on-surface-variant">Details: {error.details}</p>}
+                {error.code && <p className="mt-1 text-xs text-on-surface-variant">Code: {error.code}</p>}
+              </div>
+            )}
+            {!error && suggestions.length === 0 ? (
               <div className="text-center py-8 text-on-surface-variant">
                 <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No matches yet!</p>
-                <p className="text-sm mt-1">We're finding great connections for you.</p>
+                <p>No one else in the network yet!</p>
+                <p className="text-sm mt-1">When others join, they&apos;ll show up here.</p>
               </div>
             ) : (
               suggestions.map((suggestion) => (

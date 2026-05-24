@@ -1,14 +1,22 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { formatSupabaseError } from '@/lib/api-errors'
+import {
+  buildTemplateRationale,
+  readLocalMatchStatus,
+  writeLocalMatchStatus,
+} from '@/lib/match-rationale'
 import type { MatchSuggestion, Profile } from '@/types/database'
 
-interface SuggestionWithMatch extends MatchSuggestion {
+export interface SuggestionWithMatch extends MatchSuggestion {
   matched_profile?: Profile | null
+  synthetic?: boolean
 }
 
 export function useMatchSuggestions(userId: string | undefined) {
   const [suggestions, setSuggestions] = useState<SuggestionWithMatch[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<ReturnType<typeof formatSupabaseError> | null>(null)
 
   const fetchSuggestions = useCallback(async () => {
     if (!userId) {
@@ -16,39 +24,82 @@ export function useMatchSuggestions(userId: string | undefined) {
       return
     }
 
-    // Fetch suggestions first
-    const { data: suggestionsData, error: suggestionsError } = await supabase
+    const { data: viewerProfile, error: viewerError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single()
+
+    if (viewerError) {
+      console.error('Error fetching viewer profile:', viewerError)
+      setError(formatSupabaseError(viewerError))
+      setLoading(false)
+      return
+    }
+
+    const { data: allProfiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('*')
+      .neq('id', userId)
+      .order('created_at', { ascending: false })
+
+    if (profilesError) {
+      console.error('Error fetching profiles:', profilesError)
+      setError(formatSupabaseError(profilesError))
+      setLoading(false)
+      return
+    }
+
+    const { data: savedSuggestions, error: suggestionsError } = await supabase
       .from('match_suggestions')
       .select('*')
       .eq('recipient_id', userId)
-      .order('created_at', { ascending: false })
 
     if (suggestionsError) {
-      console.error('Error fetching suggestions:', suggestionsError)
+      console.error('Error fetching match suggestions:', suggestionsError)
+      setError(formatSupabaseError(suggestionsError))
       setLoading(false)
       return
     }
 
-    if (!suggestionsData || suggestionsData.length === 0) {
-      setSuggestions([])
-      setLoading(false)
-      return
-    }
+    setError(null)
 
-    // Fetch matched profiles separately
-    const matchedUserIds = suggestionsData.map(s => s.matched_user_id)
-    const { data: profilesData } = await supabase
-      .from('profiles')
-      .select('*')
-      .in('id', matchedUserIds)
+    const savedByMatchId = new Map(
+      (savedSuggestions ?? []).map(s => [s.matched_user_id, s])
+    )
+    const localStatus = readLocalMatchStatus(userId)
 
-    // Combine suggestions with profiles
-    const suggestionsWithProfiles = suggestionsData.map(suggestion => ({
-      ...suggestion,
-      matched_profile: profilesData?.find(p => p.id === suggestion.matched_user_id) || null,
-    }))
+    const merged: SuggestionWithMatch[] = (allProfiles ?? []).map(profile => {
+      const saved = savedByMatchId.get(profile.id)
 
-    setSuggestions(suggestionsWithProfiles)
+      if (saved) {
+        return {
+          ...saved,
+          matched_profile: profile,
+          synthetic: false,
+        }
+      }
+
+      const rationale = buildTemplateRationale(viewerProfile, profile)
+      const status = localStatus[profile.id] ?? 'new'
+
+      return {
+        id: `synthetic-${profile.id}`,
+        recipient_id: userId,
+        matched_user_id: profile.id,
+        rationale,
+        status,
+        created_at: profile.created_at,
+        matched_profile: profile,
+        synthetic: true,
+      }
+    })
+
+    merged.sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+
+    setSuggestions(merged)
     setLoading(false)
   }, [userId])
 
@@ -58,7 +109,7 @@ export function useMatchSuggestions(userId: string | undefined) {
     if (!userId) return
 
     const channel = supabase
-      .channel('match_suggestions_changes')
+      .channel('inbox_updates')
       .on(
         'postgres_changes',
         {
@@ -82,6 +133,17 @@ export function useMatchSuggestions(userId: string | undefined) {
     suggestionId: string,
     status: 'accepted' | 'declined'
   ) => {
+    const suggestion = suggestions.find(s => s.id === suggestionId)
+    if (!suggestion || !userId) return
+
+    if (suggestion.synthetic) {
+      writeLocalMatchStatus(userId, suggestion.matched_user_id, status)
+      setSuggestions(prev =>
+        prev.map(s => (s.id === suggestionId ? { ...s, status } : s))
+      )
+      return
+    }
+
     const { error: updateError } = await supabase
       .from('match_suggestions')
       .update({ status })
@@ -95,6 +157,7 @@ export function useMatchSuggestions(userId: string | undefined) {
   return {
     suggestions,
     loading,
+    error,
     updateSuggestionStatus,
     refetch: fetchSuggestions,
   }
