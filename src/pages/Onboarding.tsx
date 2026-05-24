@@ -1,13 +1,18 @@
 import { useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
-import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Send, Bot, User } from 'lucide-react'
+import { Spinner } from '@/components/ui/spinner'
+import { Send, Bot, User, CheckCircle2, Database, X } from 'lucide-react'
+import {
+  formatDiagnosisMessage,
+  type SendEventResponse,
+} from '@/lib/api-errors'
+import type { OnboardingLocationState } from '@/types/navigation'
 import type { ChatMessage } from '@/types/matching'
 
 const ONBOARDING_QUESTIONS = [
@@ -20,25 +25,36 @@ const ONBOARDING_QUESTIONS = [
 export function Onboarding() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const linkedInState = location.state as OnboardingLocationState | null
   const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+  const [showLinkedInBanner, setShowLinkedInBanner] = useState(
+    Boolean(linkedInState?.linkedInConnected)
+  )
   
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: '1',
       role: 'assistant',
       content: `Hey${isDemoMode ? ' there' : ` ${user?.user_metadata?.name?.split(' ')[0] || 'there'}`}! 👋 I'm here to help you find meaningful connections.\n\n${ONBOARDING_QUESTIONS[0]}`,
-      timestamp: new Date().toISOString(),
     },
   ])
   const [input, setInput] = useState('')
   const [questionIndex, setQuestionIndex] = useState(0)
   const [isTyping, setIsTyping] = useState(false)
+  const [isRedirecting, setIsRedirecting] = useState(false)
   
   // Store user responses
   const responsesRef = useRef<string[]>([])
 
-  const saveProfileAndTriggerIngestion = async () => {
-    if (!user?.id) return
+  const saveProfileAndTriggerIngestion = async (): Promise<{
+    success: boolean
+    message?: string
+    pipeline?: SendEventResponse
+  }> => {
+    if (!user?.id) {
+      return { success: false, message: 'Not signed in — please log in again.' }
+    }
 
     const [currentFocus, lookingFor, canOffer, location] = responsesRef.current
 
@@ -50,16 +66,17 @@ export function Onboarding() {
     }
 
     try {
-      // Save conversation thread (optional, for history)
-      await supabase
-        .from('conversation_threads')
-        .insert({
-          user_id: user.id,
-          thread_type: 'onboarding',
-          messages: promptResponses,
-        })
+      const meta = user.user_metadata ?? {}
+      const profileMeta = {
+        displayName:
+          meta.name ||
+          meta.full_name ||
+          [meta.given_name, meta.family_name].filter(Boolean).join(' ') ||
+          user.email?.split('@')[0] ||
+          'User',
+        avatarUrl: meta.avatar_url || meta.picture || meta.avatar || null,
+      }
 
-      // Trigger Inngest event - this will save prompt_responses and generate embedding
       const eventResponse = await fetch('/api/send-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -68,18 +85,31 @@ export function Onboarding() {
           data: {
             userId: user.id,
             promptResponses,
+            profileMeta,
           },
         }),
       })
-      
-      const result = await eventResponse.json()
-      console.log('Inngest event response:', result)
-      
-      if (!eventResponse.ok) {
-        console.error('Inngest event failed:', result)
+
+      const pipeline = (await eventResponse.json()) as SendEventResponse
+
+      console.log('Profile ingestion response:', pipeline)
+
+      if (!eventResponse.ok || !pipeline.success) {
+        return {
+          success: false,
+          message: formatDiagnosisMessage(pipeline),
+          pipeline,
+        }
       }
+
+      return { success: true, pipeline }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       console.error('Error in saveProfileAndTriggerIngestion:', error)
+      return {
+        success: false,
+        message: `Unexpected error during profile setup: ${message}`,
+      }
     }
   }
 
@@ -90,7 +120,6 @@ export function Onboarding() {
       id: Date.now().toString(),
       role: 'user',
       content: input,
-      timestamp: new Date().toISOString(),
     }
 
     // Store the response
@@ -110,25 +139,30 @@ export function Onboarding() {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: `Got it! ${nextQuestion}`,
-        timestamp: new Date().toISOString(),
       }
       setMessages(prev => [...prev, assistantMessage])
       setQuestionIndex(nextIndex)
     } else {
-      // All questions answered - save to database
-      await saveProfileAndTriggerIngestion()
-      
-      const completionMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "Perfect! I've got everything I need. I'm now analyzing your profile and looking for great matches in your area. You'll see suggestions appear in your inbox as I find them. Let's go! 🚀",
-        timestamp: new Date().toISOString(),
+      const result = await saveProfileAndTriggerIngestion()
+
+      if (result.success) {
+        const completionMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content:
+            "You're all set! 🎉\n\nI'm finding people in the network who align with what you're working on. Taking you to your inbox now…",
+        }
+        setMessages(prev => [...prev, completionMessage])
+        setIsRedirecting(true)
+        setTimeout(() => navigate('/inbox'), 2500)
+      } else {
+        const completionMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `I saved your answers but hit a problem while setting up your profile:\n\n${result.message}\n\nTry refreshing to retry, or check the browser console for details.`,
+        }
+        setMessages(prev => [...prev, completionMessage])
       }
-      setMessages(prev => [...prev, completionMessage])
-      
-      setTimeout(() => {
-        navigate('/inbox')
-      }, 2000)
     }
 
     setIsTyping(false)
@@ -157,6 +191,32 @@ export function Onboarding() {
           </div>
         </div>
       </header>
+
+      {showLinkedInBanner ? (
+        <div className="border-b border-outline-variant bg-primary-container/60 px-4 py-3">
+          <div className="container mx-auto max-w-2xl flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-on-primary-container">
+                You're now in the network
+              </p>
+              <p className="text-xs text-on-primary-container/80 mt-0.5 flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 shrink-0" />
+                LinkedIn connected and saved to Supabase
+                {linkedInState?.displayName ? ` as ${linkedInState.displayName}` : ''}.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowLinkedInBanner(false)}
+              className="text-on-primary-container/70 hover:text-on-primary-container shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <ScrollArea className="flex-1 p-4">
         <div className="container mx-auto max-w-2xl space-y-4">
@@ -197,12 +257,24 @@ export function Onboarding() {
                 </AvatarFallback>
               </Avatar>
               <Card>
-                <CardContent className="p-3">
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-on-surface-variant rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 bg-on-surface-variant rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 bg-on-surface-variant rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
+                <CardContent className="p-3 flex items-center">
+                  <Spinner size="sm" />
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {isRedirecting && !isTyping && (
+            <div className="flex gap-3">
+              <Avatar className="w-8 h-8">
+                <AvatarFallback className="bg-primary text-on-primary">
+                  <Bot className="w-4 h-4" />
+                </AvatarFallback>
+              </Avatar>
+              <Card className="border-primary/30 bg-primary-container/20">
+                <CardContent className="p-3 flex items-center gap-2">
+                  <Spinner size="sm" />
+                  <p className="text-sm text-on-surface-variant">Opening your inbox…</p>
                 </CardContent>
               </Card>
             </div>
@@ -216,11 +288,24 @@ export function Onboarding() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Type your response..."
+            placeholder={
+              isRedirecting
+                ? 'Taking you to your inbox…'
+                : 'Type your response...'
+            }
+            disabled={isRedirecting}
             className="flex-1"
           />
-          <Button onClick={handleSend} size="icon" disabled={!input.trim() || isTyping}>
-            <Send className="w-4 h-4" />
+          <Button
+            onClick={handleSend}
+            size="icon"
+            disabled={!input.trim() || isTyping || isRedirecting}
+          >
+            {isTyping ? (
+              <Spinner size="sm" className="text-on-primary" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
           </Button>
         </div>
       </div>

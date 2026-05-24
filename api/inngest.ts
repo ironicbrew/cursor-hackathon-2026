@@ -1,19 +1,7 @@
 import { serve } from 'inngest/next'
-import { Inngest } from 'inngest'
-import { createClient } from '@supabase/supabase-js'
-
-const inngest = new Inngest({ id: 'networth-ai' })
-
-function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url || !key) {
-    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
-  }
-
-  return createClient(url, key)
-}
+import { ensureUserProfile, runMatching, type ProfileMeta } from './_lib/jobs'
+import { getSupabaseAdmin } from './_lib/supabase-admin'
+import { inngest } from './_lib/inngest-client'
 
 // ===========================================
 // FUNCTION 1: Process user profile after onboarding
@@ -21,7 +9,7 @@ function getSupabaseAdmin() {
 const profileIngested = inngest.createFunction(
   { id: 'profile-ingested', triggers: [{ event: 'user/profile.ingested' }] },
   async ({ event, step }) => {
-    const { userId, promptResponses } = event.data as {
+    const { userId, promptResponses, profileMeta } = event.data as {
       userId: string
       promptResponses: {
         currentFocus: string
@@ -29,10 +17,32 @@ const profileIngested = inngest.createFunction(
         canOffer: string
         location: string
       }
+      profileMeta?: ProfileMeta
     }
 
     console.log('Processing profile for user:', userId)
     const supabaseAdmin = getSupabaseAdmin()
+
+    await step.run('ensure-profile', async () => {
+      const result = await ensureUserProfile(userId, profileMeta)
+      if (!result.success) {
+        const failed = result.steps.find(s => !s.ok)
+        throw new Error(failed?.error?.message || 'Failed to ensure profile row')
+      }
+    })
+
+    await step.run('save-conversation-thread', async () => {
+      const { error } = await supabaseAdmin.from('conversation_threads').insert({
+        user_id: userId,
+        thread_type: 'onboarding',
+        messages: promptResponses,
+      })
+
+      if (error) {
+        console.error('Error saving conversation thread:', error)
+        throw error
+      }
+    })
 
     // Step 1: Save prompt responses to profile
     await step.run('save-prompt-responses', async () => {
@@ -122,156 +132,18 @@ const matchingRun = inngest.createFunction(
     const { triggeredBy } = event.data as { triggeredBy: string }
     console.log('Running matching for user:', triggeredBy)
 
-    const supabaseAdmin = getSupabaseAdmin()
+    const result = await step.run('run-matching', () => runMatching(triggeredBy))
 
-    // Step 1: Find similar profiles using the database function
-    const similarProfiles = await step.run('find-similar-profiles', async () => {
-      const { data, error } = await supabaseAdmin.rpc('find_similar_profiles', {
-        target_user_id: triggeredBy,
-        similarity_threshold: 0.3, // Lower threshold to get more matches
-        max_results: 5,
-      })
-
-      if (error) {
-        console.error('Error finding similar profiles:', error)
-        // Fallback: get any other user
-        const { data: fallbackUsers } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_name')
-          .neq('id', triggeredBy)
-          .limit(3)
-
-        return fallbackUsers?.map(u => ({ 
-          user_id: u.id, 
-          display_name: u.display_name, 
-          similarity: 0.5 
-        })) || []
-      }
-
-      console.log('Found similar profiles:', data?.length || 0)
-
-      // If no similar profiles found, fallback to random users
-      if (!data || data.length === 0) {
-        console.log('No similar profiles, using fallback')
-        const { data: fallbackUsers } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_name')
-          .neq('id', triggeredBy)
-          .limit(3)
-
-        return fallbackUsers?.map(u => ({ 
-          user_id: u.id, 
-          display_name: u.display_name, 
-          similarity: 0.5 
-        })) || []
-      }
-
-      return data
-    })
-
-    if (similarProfiles.length === 0) {
-      console.log('No other users to match with')
-      return { matchesFound: 0 }
+    if (!result.success) {
+      const failed = result.steps.find(s => !s.ok)
+      throw new Error(failed?.error?.message || result.summary)
     }
 
-    // Step 2: Generate rationales and create match suggestions
-    for (const match of similarProfiles) {
-      await step.run(`create-match-${match.user_id}`, async () => {
-        // Check if match already exists
-        const { data: existing } = await supabaseAdmin
-          .from('match_suggestions')
-          .select('id')
-          .eq('recipient_id', triggeredBy)
-          .eq('matched_user_id', match.user_id)
-          .single()
-
-        if (existing) {
-          console.log('Match already exists, skipping')
-          return
-        }
-
-        // Get both profiles for rationale generation
-        const { data: profiles } = await supabaseAdmin
-          .from('profiles')
-          .select('id, display_name, prompt_responses')
-          .in('id', [triggeredBy, match.user_id])
-
-        if (!profiles || profiles.length < 2) {
-          console.log('Could not fetch profiles for rationale')
-          return
-        }
-
-        const userProfile = profiles.find(p => p.id === triggeredBy)
-        const matchProfile = profiles.find(p => p.id === match.user_id)
-
-        // Generate AI rationale
-        const prompt = `You are a professional networking assistant. Based on these two professionals, explain why they should connect.
-
-Person 1:
-${JSON.stringify(userProfile?.prompt_responses || {}, null, 2)}
-
-Person 2:
-${JSON.stringify(matchProfile?.prompt_responses || {}, null, 2)}
-
-Similarity score: ${(match.similarity * 100).toFixed(0)}%
-
-Respond in JSON format:
-{
-  "why": "One sentence explaining why this is a valuable connection",
-  "common_ground": ["shared interest 1", "shared interest 2"],
-  "conversation_starters": ["opener 1", "opener 2"],
-  "networking_tips": ["tip 1", "tip 2"]
-}`
-
-        const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
-          }),
-        })
-
-        const aiResult = await aiResponse.json()
-        let rationale = {}
-        
-        try {
-          rationale = JSON.parse(aiResult.choices?.[0]?.message?.content || '{}')
-        } catch {
-          rationale = { why: 'Great potential connection!', common_ground: [], conversation_starters: [], networking_tips: [] }
-        }
-
-        // Insert match suggestions for both users
-        const { error: insertError } = await supabaseAdmin
-          .from('match_suggestions')
-          .insert([
-            {
-              recipient_id: triggeredBy,
-              matched_user_id: match.user_id,
-              rationale,
-              status: 'new',
-            },
-            {
-              recipient_id: match.user_id,
-              matched_user_id: triggeredBy,
-              rationale,
-              status: 'new',
-            },
-          ])
-
-        if (insertError) {
-          console.error('Error inserting match:', insertError)
-        } else {
-          console.log('Match created between', triggeredBy, 'and', match.user_id)
-        }
-      })
+    const createStep = result.steps.find(s => s.step === 'create_match_suggestions')
+    return {
+      matchesCreated: createStep?.data?.matchesCreated ?? 0,
+      totalProfiles: createStep?.data?.totalProfiles ?? 0,
     }
-
-    return { matchesFound: similarProfiles.length }
   }
 )
 

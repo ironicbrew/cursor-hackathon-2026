@@ -81,17 +81,7 @@ npm install
 cp .env.example .env
 ```
 
-3. Configure your `.env`:
-
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-VITE_DEMO_MODE=true  # For judging without real LinkedIn
-
-# Server-side (for Vercel deployment)
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-OPENAI_API_KEY=your-openai-key
-```
+3. Edit `.env` with your Supabase and OpenAI keys (see comments in `.env.example`).
 
 4. Run the Supabase schema:
 
@@ -109,7 +99,7 @@ npx tsx scripts/seed-demo.ts
 6. Start development:
 
 ```bash
-npm run dev
+npm run dev:all
 ```
 
 ### Demo Mode

@@ -15,6 +15,7 @@ export interface PromptResponses {
 
 export interface MatchRationale {
   why: string
+  suggested_message?: string
   common_ground: string[]
   conversation_starters: string[]
   networking_tips: string[]

@@ -1,14 +1,25 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { useSupabaseHealth, type NetworkMember } from '@/hooks/useSupabaseHealth'
 import { Button } from '@/components/ui/button'
+import { LoadingScreen } from '@/components/loading-screen'
+import { Spinner } from '@/components/ui/spinner'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Users, MessageSquare, Sparkles, Link2 } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 export function Landing() {
   const { user, loading, signInWithLinkedIn } = useAuth()
+  const {
+    loading: healthLoading,
+    ok,
+    profileCount,
+    recentMembers,
+    error: healthError,
+  } = useSupabaseHealth()
   const navigate = useNavigate()
   const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+  const [signingIn, setSigningIn] = useState(false)
 
   useEffect(() => {
     if (user && !loading) {
@@ -21,19 +32,17 @@ export function Landing() {
       navigate('/onboarding')
       return
     }
+    setSigningIn(true)
     try {
       await signInWithLinkedIn()
     } catch (error) {
       console.error('Sign in error:', error)
+      setSigningIn(false)
     }
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-on-surface-variant">Loading...</div>
-      </div>
-    )
+    return <LoadingScreen />
   }
 
   return (
@@ -82,15 +91,120 @@ export function Landing() {
         </div>
 
         <div className="flex flex-col items-center gap-4">
-          <Button size="lg" onClick={handleSignIn} className="gap-2">
-            <Link2 className="w-5 h-5" />
-            {isDemoMode ? 'Try Demo' : 'Sign in with LinkedIn'}
+          <Button size="lg" onClick={handleSignIn} disabled={signingIn} className="gap-2">
+            {signingIn ? (
+              <Spinner size="sm" className="text-on-primary" />
+            ) : (
+              <Link2 className="w-5 h-5" />
+            )}
+            {signingIn ? 'Redirecting…' : isDemoMode ? 'Try Demo' : 'Sign in with LinkedIn'}
           </Button>
           <p className="text-sm text-on-surface-variant">
             We only access your public profile information
           </p>
+
+          <DbStatus
+            healthLoading={healthLoading}
+            ok={ok}
+            profileCount={profileCount}
+            recentMembers={recentMembers}
+            healthError={healthError}
+          />
         </div>
       </div>
+    </div>
+  )
+}
+
+function formatJoinedAgo(isoDate: string): string {
+  const seconds = Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000)
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+
+  if (seconds < 60) return `joined ${rtf.format(-Math.max(seconds, 1), 'second')}`
+
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `joined ${rtf.format(-minutes, 'minute')}`
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `joined ${rtf.format(-hours, 'hour')}`
+
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `joined ${rtf.format(-days, 'day')}`
+
+  const date = new Date(isoDate)
+  return `joined ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+}
+
+function networkSummary(count: number): string {
+  if (count === 0) return 'No one in the network yet'
+  if (count === 1) return '1 person in the network'
+  return `${count} people in the network`
+}
+
+function DbStatus({
+  healthLoading,
+  ok,
+  profileCount,
+  recentMembers,
+  healthError,
+}: {
+  healthLoading: boolean
+  ok: boolean
+  profileCount: number | null
+  recentMembers: NetworkMember[]
+  healthError: string | null
+}) {
+  if (healthLoading) {
+    return (
+      <p className="text-xs text-on-surface-variant flex items-center gap-1.5 mt-2">
+        <Spinner size="sm" />
+        Checking database…
+      </p>
+    )
+  }
+
+  if (!ok) {
+    return (
+      <p className="text-xs text-destructive flex items-center gap-1.5 mt-2 max-w-sm text-center">
+        <span className="inline-block w-2 h-2 rounded-full bg-destructive shrink-0" />
+        Database unreachable{healthError ? `: ${healthError}` : ''}
+      </p>
+    )
+  }
+
+  const count = profileCount ?? 0
+  const hiddenCount = Math.max(count - recentMembers.length, 0)
+
+  return (
+    <div className="mt-4 w-full max-w-sm rounded-xl border border-outline-variant/40 bg-surface-variant/50 px-4 py-3 text-left">
+      <p className="text-xs text-on-surface-variant flex items-center gap-1.5">
+        <span className="inline-block w-2 h-2 rounded-full bg-primary shrink-0" />
+        Connected · {networkSummary(count)}
+      </p>
+
+      {recentMembers.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {recentMembers.map((member) => (
+            <li
+              key={`${member.firstName}-${member.joinedAt}`}
+              className="flex items-center justify-between gap-3 text-sm"
+            >
+              <span className="font-medium text-on-surface">{member.firstName}</span>
+              <span className="text-xs text-on-surface-variant shrink-0">
+                {formatJoinedAgo(member.joinedAt)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : count > 0 ? (
+        <p className="mt-2 text-xs text-on-surface-variant">Recent joiners will appear here.</p>
+      ) : null}
+
+      {hiddenCount > 0 ? (
+        <p className="mt-2 text-xs text-on-surface-variant">
+          + {hiddenCount} earlier member{hiddenCount === 1 ? '' : 's'}
+        </p>
+      ) : null}
     </div>
   )
 }
