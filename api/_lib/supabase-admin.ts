@@ -1,5 +1,4 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import ws from 'ws'
 
 let adminClient: SupabaseClient | null = null
 
@@ -11,7 +10,7 @@ function publishableKey(): string | undefined {
   return process.env.VITE_SUPABASE_ANON_KEY?.trim()
 }
 
-/** Service-role Supabase client for API/Inngest (Node 20 needs explicit WebSocket transport). */
+/** Service-role Supabase client for API/Inngest. */
 export function getSupabaseAdmin(): SupabaseClient {
   const url = projectUrl()
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
@@ -23,7 +22,6 @@ export function getSupabaseAdmin(): SupabaseClient {
   if (!adminClient) {
     adminClient = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
-      realtime: { transport: ws },
     })
   }
 

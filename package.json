@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "dev:vercel": "vercel dev --listen 3000",
-    "dev:inngest": "wait-on -t 60000 http-get://127.0.0.1:3000/api/inngest && npx --yes inngest-cli@latest dev -p 8288 -u http://127.0.0.1:3000/api/inngest",
-    "dev:all": "concurrently -k -n vercel,inngest -c blue,magenta \"npm run dev:vercel\" \"npm run dev:inngest\"",
+    "dev:api": "vercel dev --listen 3001",
+    "dev:inngest": "wait-on -t 60000 http-get://127.0.0.1:3001/api/inngest && npx --yes inngest-cli@latest dev -p 8288 -u http://127.0.0.1:3001/api/inngest",
+    "dev:all": "concurrently -k -n vite,api,inngest -c blue,cyan,magenta \"vite --port 3000\" \"npm run dev:api\" \"npm run dev:inngest\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

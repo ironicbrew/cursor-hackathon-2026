@@ -9,8 +9,8 @@ import {
 import { runDevEvent } from './_lib/jobs'
 import type { PipelineResult } from './_lib/errors'
 
-/** Login-time profile creation must complete before redirect — run inline, not via Inngest queue. */
-const INLINE_EVENTS = new Set(['user/profile.ensure'])
+/** Critical auth/onboarding paths — run inline so the client gets JSON before redirect. */
+const INLINE_EVENTS = new Set(['user/profile.ensure', 'user/profile.ingested'])
 
 function respondWithPipeline(
   res: VercelResponse,
@@ -57,7 +57,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { name, data } = req.body
+    const body =
+      typeof req.body === 'string'
+        ? (JSON.parse(req.body) as { name?: string; data?: Record<string, unknown> })
+        : (req.body as { name?: string; data?: Record<string, unknown> } | undefined)
+
+    const { name, data } = body ?? {}
 
     console.log('Sending Inngest event:', { name, data })
 

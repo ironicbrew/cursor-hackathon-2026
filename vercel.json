@@ -1,13 +1,20 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "devCommand": "vite --port $PORT",
   "installCommand": "npm install",
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ],
   "functions": {
+    "api/send-event.ts": {
+      "maxDuration": 60
+    },
     "api/inngest.ts": {
       "maxDuration": 60
     }

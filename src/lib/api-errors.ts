@@ -51,6 +51,26 @@ function displayErrorMessage(result: SendEventResponse): string | null {
   return null
 }
 
+/** Parse /api/send-event body — handles Vercel plain-text 500s gracefully. */
+export async function parseSendEventResponse(response: Response): Promise<SendEventResponse> {
+  const text = await response.text()
+
+  try {
+    return JSON.parse(text) as SendEventResponse
+  } catch {
+    const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 160)
+    return {
+      success: false,
+      error: snippet || response.statusText || 'Unknown server error',
+      summary: `HTTP ${response.status}`,
+      hint:
+        response.status >= 500
+          ? 'The API route crashed or timed out. Check Vercel function logs and env vars (SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL).'
+          : undefined,
+    }
+  }
+}
+
 export function formatSupabaseError(error: PostgrestError): DiagnosisError {
   const message =
     typeof error.message === 'string' ? error.message : JSON.stringify(error.message ?? error)

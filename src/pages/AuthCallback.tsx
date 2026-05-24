@@ -8,7 +8,7 @@ import { CheckCircle2, Database, Link2 } from 'lucide-react'
 
 import { Spinner } from '@/components/ui/spinner'
 
-import { formatDiagnosisMessage, type SendEventResponse } from '@/lib/api-errors'
+import { formatDiagnosisMessage, parseSendEventResponse, type SendEventResponse } from '@/lib/api-errors'
 
 import { supabase } from '@/lib/supabase'
 
@@ -70,7 +70,7 @@ async function ensureProfileViaEvent(user: User, accessToken?: string): Promise<
     }),
   })
 
-  return response.json() as Promise<SendEventResponse>
+  return parseSendEventResponse(response)
 }
 
 

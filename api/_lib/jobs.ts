@@ -174,64 +174,8 @@ export async function runProfileIngested(
 
   steps.push(okStep('save_prompt_responses', { userId }))
 
-  const textToEmbed = [
-    promptResponses.currentFocus,
-    `Looking for: ${promptResponses.lookingFor}`,
-    `Can offer: ${promptResponses.canOffer}`,
-    `Location: ${promptResponses.location}`,
-  ].join(' | ')
-
-  let embedding: number[] | undefined
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'text-embedding-3-small',
-        input: textToEmbed,
-      }),
-    })
-
-    const result = await response.json()
-    if (!response.ok) {
-      steps.push(
-        failStep('generate_embedding', {
-          message: result.error?.message || 'OpenAI embeddings request failed',
-        }, 'openai')
-      )
-      return buildPipelineResult(userId, steps)
-    }
-
-    embedding = result.data?.[0]?.embedding
-    if (!embedding) {
-      steps.push(failStep('generate_embedding', { message: 'No embedding returned from OpenAI' }, 'openai'))
-      return buildPipelineResult(userId, steps)
-    }
-
-    steps.push(okStep('generate_embedding', { dimensions: embedding.length, model: 'text-embedding-3-small' }))
-  } catch (error) {
-    steps.push(failStep('generate_embedding', error, 'openai'))
-    return buildPipelineResult(userId, steps)
-  }
-
-  const { error: embedError } = await supabaseAdmin
-    .from('profiles')
-    .update({ embedding, updated_at: new Date().toISOString() })
-    .eq('id', userId)
-
-  if (embedError) {
-    steps.push(failStep('save_embedding', embedError, 'supabase'))
-    return buildPipelineResult(userId, steps)
-  }
-
-  steps.push(okStep('save_embedding', { userId }))
-
-  const matchingResult = await runMatching(userId)
-  steps.push(...matchingResult.steps)
+  // Embeddings + server-side matching are optional — inbox builds matches client-side.
+  steps.push(okStep('run_matching', { skipped: true, reason: 'client_inbox_matching' }))
 
   return buildPipelineResult(userId, steps)
 }
@@ -308,46 +252,7 @@ export async function runDevEvent(name: string, data: Record<string, unknown>): 
       profileMeta?: ProfileMeta
       accessToken?: string
     }
-    const profileResult = await ensureUserProfile(userId, profileMeta, accessToken)
-    if (!profileResult.success) return profileResult
-
-    let matchingResult: PipelineResult
-    try {
-      matchingResult = await runMatching(userId)
-    } catch (error) {
-      matchingResult = {
-        success: false,
-        userId,
-        steps: [failStep('run_matching', error, 'internal')],
-        summary: `Failed at "run_matching": ${error instanceof Error ? error.message : String(error)}`,
-      }
-    }
-
-    const matchingFailed = matchingResult.steps.find(s => !s.ok)
-    if (!matchingResult.success && matchingFailed && isInvalidApiKeyError(matchingFailed.error)) {
-      return {
-        success: true,
-        userId,
-        steps: [
-          ...profileResult.steps,
-          ...matchingResult.steps,
-          okStep('run_matching', {
-            skipped: true,
-            reason: 'invalid_service_role_key',
-          }),
-        ],
-        summary: `${profileResult.summary} (matching skipped — fix SUPABASE_SERVICE_ROLE_KEY)`,
-      }
-    }
-
-    return {
-      success: profileResult.success && matchingResult.success,
-      userId,
-      steps: [...profileResult.steps, ...matchingResult.steps],
-      summary: matchingResult.success
-        ? `${profileResult.summary} → ${matchingResult.summary}`
-        : profileResult.summary,
-    }
+    return ensureUserProfile(userId, profileMeta, accessToken)
   }
 
   if (name === 'user/profile.ingested') {

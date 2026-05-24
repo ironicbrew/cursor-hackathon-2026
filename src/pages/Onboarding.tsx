@@ -10,8 +10,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { Send, Bot, User, CheckCircle2, Database, X } from 'lucide-react'
 import {
   formatDiagnosisMessage,
+  parseSendEventResponse,
   type SendEventResponse,
 } from '@/lib/api-errors'
+import { saveOnboardingProfileClient } from '@/lib/save-onboarding-profile'
 import type { OnboardingLocationState } from '@/types/navigation'
 import type { ChatMessage } from '@/types/matching'
 
@@ -65,18 +67,20 @@ export function Onboarding() {
       location: location || '',
     }
 
-    try {
-      const meta = user.user_metadata ?? {}
-      const profileMeta = {
-        displayName:
-          meta.name ||
-          meta.full_name ||
-          [meta.given_name, meta.family_name].filter(Boolean).join(' ') ||
-          user.email?.split('@')[0] ||
-          'User',
-        avatarUrl: meta.avatar_url || meta.picture || meta.avatar || null,
-      }
+    const meta = user.user_metadata ?? {}
+    const profileMeta = {
+      displayName:
+        meta.name ||
+        meta.full_name ||
+        [meta.given_name, meta.family_name].filter(Boolean).join(' ') ||
+        user.email?.split('@')[0] ||
+        'User',
+      avatarUrl: meta.avatar_url || meta.picture || meta.avatar || null,
+    }
 
+    let pipeline: SendEventResponse | undefined
+
+    try {
       const eventResponse = await fetch('/api/send-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -90,26 +94,36 @@ export function Onboarding() {
         }),
       })
 
-      const pipeline = (await eventResponse.json()) as SendEventResponse
-
+      pipeline = await parseSendEventResponse(eventResponse)
       console.log('Profile ingestion response:', pipeline)
 
-      if (!eventResponse.ok || !pipeline.success) {
-        return {
-          success: false,
-          message: formatDiagnosisMessage(pipeline),
-          pipeline,
-        }
+      if (eventResponse.ok && pipeline.success) {
+        return { success: true, pipeline }
       }
-
-      return { success: true, pipeline }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error in saveProfileAndTriggerIngestion:', error)
+      console.warn('API profile ingestion failed, trying client fallback:', error)
+    }
+
+    console.warn('Falling back to direct Supabase profile save')
+    const fallback = await saveOnboardingProfileClient(user.id, promptResponses, profileMeta)
+
+    if (fallback.success) {
       return {
-        success: false,
-        message: `Unexpected error during profile setup: ${message}`,
+        success: true,
+        pipeline: {
+          success: true,
+          mode: 'client_fallback',
+          summary: 'Profile saved directly to Supabase.',
+        },
       }
+    }
+
+    return {
+      success: false,
+      message: pipeline
+        ? formatDiagnosisMessage(pipeline)
+        : fallback.error ?? 'Could not save your profile.',
+      pipeline,
     }
   }
 
