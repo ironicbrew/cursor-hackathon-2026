@@ -1,6 +1,6 @@
-# NetWorth AI
+# ColdConnect
 
-> Your network is your net worth. AI-powered introductions that actually matter.
+> Turn cold outreach into warm introductions. AI-powered networking that actually works.
 
 **Live Demo:** [cursor-hackathon-2026.vercel.app](https://cursor-hackathon-2026.vercel.app)
 
@@ -28,7 +28,7 @@ I've sent hundreds of cold LinkedIn messages. Response rate? **2%**. But when a 
 
 The problem isn't that I don't have a network — it's that I have no idea who in my network could actually help with what I'm working on *right now*. LinkedIn shows me connections, not *relevant* connections.
 
-**NetWorth AI solves this** by understanding what you're currently focused on, then finding people who can genuinely help — and giving you the exact words to start the conversation.
+**ColdConnect solves this** by understanding what you're currently focused on, then finding people who can genuinely help — and giving you the exact words to start the conversation.
 
 ---
 
@@ -52,7 +52,7 @@ This is **NOT** another:
 
 ## The Solution
 
-NetWorth AI is an intelligent networking broker that:
+ColdConnect is an intelligent networking broker that:
 
 1. **Understands what you're working on** — Conversational onboarding captures your current goals, not just your job title
 2. **Authenticates via LinkedIn** — One-click OAuth, no manual profile entry
