@@ -23,7 +23,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   return <>{children}</>
 }
-console.log("hi")
 
 function App() {
   return (
