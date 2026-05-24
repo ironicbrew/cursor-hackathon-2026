@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '@/hooks/useAuth'
+import { LoadingScreen } from '@/components/loading-screen'
 import { useMatchSuggestions, type SuggestionWithMatch } from '@/hooks/useMatchSuggestions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +15,7 @@ import {
   MessageSquare,
   MapPin,
   Briefcase,
+  Lightbulb,
 } from 'lucide-react'
 import type { MatchRationale } from '@/types/database'
 
@@ -182,15 +184,21 @@ function SuggestionDetail({
             </Card>
           )}
 
-          {rationale?.networking_tips && rationale.networking_tips.length > 0 && (
+          {rationale?.networking_tips && rationale.networking_tips.length >= 3 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Networking Tips</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Lightbulb className="w-5 h-5 text-primary" />
+                  Networking Tips
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                <ul className="space-y-2">
+                <ul className="space-y-3">
                   {rationale.networking_tips.map((tip, i) => (
-                    <li key={i} className="text-on-surface-variant">• {tip}</li>
+                    <li key={i} className="flex items-start gap-2 text-on-surface-variant">
+                      <Check className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                      {tip}
+                    </li>
                   ))}
                 </ul>
               </CardContent>
@@ -224,11 +232,7 @@ export function Inbox() {
   const newCount = suggestions.filter(s => s.status === 'new').length
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-on-surface-variant">Loading your matches...</div>
-      </div>
-    )
+    return <LoadingScreen message="Loading your matches…" />
   }
 
   return (

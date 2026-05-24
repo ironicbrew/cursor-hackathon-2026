@@ -45,6 +45,16 @@ function addUniqueStarters(starters: string[], ...candidates: (string | undefine
   }
 }
 
+function addUniqueTips(tips: string[], ...candidates: (string | undefined)[]) {
+  for (const candidate of candidates) {
+    const text = candidate?.trim()
+    if (text && !tips.includes(text)) tips.push(text)
+  }
+}
+
+const MIN_NETWORKING_TIPS = 3
+const MAX_NETWORKING_TIPS = 5
+
 function buildConversationStarters(
   viewer: MatchProfile,
   matched: MatchProfile,
@@ -132,6 +142,120 @@ function ensureMinConversationStarters(
   return merged
 }
 
+function buildNetworkingTips(viewer: MatchProfile, matched: MatchProfile): string[] {
+  const name = firstName(matched.display_name)
+  const responses = matched.prompt_responses
+  const focus = responses?.currentFocus?.trim()
+  const lookingFor = responses?.lookingFor?.trim()
+  const canOffer = responses?.canOffer?.trim()
+  const location = responses?.location?.trim()
+  const viewerFocus = viewer.prompt_responses?.currentFocus?.trim()
+  const viewerLookingFor = viewer.prompt_responses?.lookingFor?.trim()
+  const viewerLocation = viewer.prompt_responses?.location?.trim()
+
+  const tips: string[] = []
+  const hasPromptData = Boolean(focus || lookingFor || canOffer || location)
+
+  if (hasPromptData) {
+    addUniqueTips(
+      tips,
+      'Lead with curiosity about something specific from their profile rather than a generic pitch.',
+      `Reference ${name}'s focus or goals early — it shows you read their profile.`
+    )
+  } else {
+    addUniqueTips(
+      tips,
+      'Ask what they are working on — they may still be setting up their profile.',
+      'Keep your first message short and open-ended to make replying easy.'
+    )
+  }
+
+  if (focus) {
+    addUniqueTips(
+      tips,
+      `Ask an open-ended question about ${focus} instead of jumping straight to your ask.`,
+      `Share one relevant insight from your experience with ${focus} to give them a reason to reply.`
+    )
+  }
+
+  if (lookingFor) {
+    addUniqueTips(
+      tips,
+      `If you can help with ${lookingFor}, mention it briefly — but lead with genuine interest first.`,
+      `Ask what a good outcome would look like for them around ${lookingFor}.`
+    )
+  }
+
+  if (canOffer) {
+    addUniqueTips(
+      tips,
+      `Acknowledge their expertise in ${canOffer} before asking for anything.`,
+      'Offer to share your perspective first — reciprocity makes cold outreach warmer.'
+    )
+  }
+
+  if (location && viewerLocation && location.toLowerCase() === viewerLocation.toLowerCase()) {
+    addUniqueTips(
+      tips,
+      `You're both in ${location} — suggest a low-commitment coffee or walk if it feels natural.`
+    )
+  } else if (location) {
+    addUniqueTips(
+      tips,
+      `They're in ${location}; a quick video call may work better than assuming local meetups.`
+    )
+  }
+
+  if (viewerFocus || viewerLookingFor) {
+    addUniqueTips(
+      tips,
+      viewerFocus
+        ? `Be upfront that you're exploring ${viewerFocus} — clarity helps them decide whether to respond.`
+        : 'Be clear about why you reached out and what kind of conversation you are hoping for.'
+    )
+  }
+
+  addUniqueTips(
+    tips,
+    'Keep your first message under 3–4 sentences — long cold messages rarely get replies.',
+    `Use ${name}'s first name and one specific detail to avoid sounding like mass outreach.`,
+    'Propose a concrete next step (15-minute call, async intro) instead of leaving things open-ended.',
+    'Follow up once after a week if you do not hear back — one polite nudge is fine.',
+    "Connect on LinkedIn after a good conversation to stay in each other's orbit."
+  )
+
+  while (tips.length < MIN_NETWORKING_TIPS) {
+    addUniqueTips(
+      tips,
+      'Lead with curiosity and make it easy for them to say yes to a short intro.',
+      'Personalize your opener — generic templates are easy to ignore.'
+    )
+  }
+
+  return tips.slice(0, MAX_NETWORKING_TIPS)
+}
+
+function ensureMinNetworkingTips(
+  tips: string[] | undefined,
+  viewer: MatchProfile,
+  matched: MatchProfile
+): string[] {
+  const template = buildNetworkingTips(viewer, matched)
+  const merged: string[] = []
+
+  for (const tip of tips ?? []) addUniqueTips(merged, tip)
+  for (const tip of template) {
+    addUniqueTips(merged, tip)
+    if (merged.length >= MAX_NETWORKING_TIPS) break
+  }
+
+  while (merged.length < MIN_NETWORKING_TIPS) {
+    addUniqueTips(merged, template[merged.length % template.length])
+  }
+
+  return merged.slice(0, MAX_NETWORKING_TIPS)
+}
+
 export function buildTemplateRationale(viewer: MatchProfile, matched: MatchProfile): MatchRationale {
   const name = firstName(matched.display_name)
   const responses = matched.prompt_responses
@@ -168,7 +292,7 @@ export function buildTemplateRationale(viewer: MatchProfile, matched: MatchProfi
     suggested_message,
     common_ground,
     conversation_starters: buildConversationStarters(viewer, matched, suggested_message),
-    networking_tips: ['Lead with curiosity about what they shared in their profile.'],
+    networking_tips: buildNetworkingTips(viewer, matched),
   }
 }
 
@@ -197,7 +321,7 @@ Respond in JSON:
   "suggested_message": "A ready-to-send first message from Person A to Person B (1-2 sentences, warm and specific)",
   "common_ground": ["shared angle 1"],
   "conversation_starters": ["opener 1", "opener 2", "opener 3"],
-  "networking_tips": ["one practical tip"]
+  "networking_tips": ["3-5 practical tips for making this connection valuable"]
 }`
 
   try {
@@ -233,7 +357,7 @@ Respond in JSON:
         suggested_message,
         template.conversation_starters
       ),
-      networking_tips: parsed.networking_tips?.length ? parsed.networking_tips : template.networking_tips,
+      networking_tips: ensureMinNetworkingTips(parsed.networking_tips, viewer, matched),
     }
   } catch (error) {
     console.error('generateMatchRationale failed:', error)

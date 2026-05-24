@@ -6,6 +6,8 @@ import type { User } from '@supabase/supabase-js'
 
 import { CheckCircle2, Database, Link2 } from 'lucide-react'
 
+import { Spinner } from '@/components/ui/spinner'
+
 import { formatDiagnosisMessage, type SendEventResponse } from '@/lib/api-errors'
 
 import { supabase } from '@/lib/supabase'
@@ -493,7 +495,7 @@ export function AuthCallback() {
 
         {phase === 'processing' ? (
 
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
+          <Spinner size="md" className="mx-auto mb-4" />
 
         ) : (
 

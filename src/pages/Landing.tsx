@@ -2,9 +2,11 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { useSupabaseHealth, type NetworkMember } from '@/hooks/useSupabaseHealth'
 import { Button } from '@/components/ui/button'
+import { LoadingScreen } from '@/components/loading-screen'
+import { Spinner } from '@/components/ui/spinner'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, MessageSquare, Sparkles, Link2, Database } from 'lucide-react'
-import { useEffect } from 'react'
+import { Users, MessageSquare, Sparkles, Link2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 export function Landing() {
   const { user, loading, signInWithLinkedIn } = useAuth()
@@ -17,6 +19,7 @@ export function Landing() {
   } = useSupabaseHealth()
   const navigate = useNavigate()
   const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+  const [signingIn, setSigningIn] = useState(false)
 
   useEffect(() => {
     if (user && !loading) {
@@ -29,19 +32,17 @@ export function Landing() {
       navigate('/onboarding')
       return
     }
+    setSigningIn(true)
     try {
       await signInWithLinkedIn()
     } catch (error) {
       console.error('Sign in error:', error)
+      setSigningIn(false)
     }
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-on-surface-variant">Loading...</div>
-      </div>
-    )
+    return <LoadingScreen />
   }
 
   return (
@@ -90,9 +91,13 @@ export function Landing() {
         </div>
 
         <div className="flex flex-col items-center gap-4">
-          <Button size="lg" onClick={handleSignIn} className="gap-2">
-            <Link2 className="w-5 h-5" />
-            {isDemoMode ? 'Try Demo' : 'Sign in with LinkedIn'}
+          <Button size="lg" onClick={handleSignIn} disabled={signingIn} className="gap-2">
+            {signingIn ? (
+              <Spinner size="sm" className="text-on-primary" />
+            ) : (
+              <Link2 className="w-5 h-5" />
+            )}
+            {signingIn ? 'Redirecting…' : isDemoMode ? 'Try Demo' : 'Sign in with LinkedIn'}
           </Button>
           <p className="text-sm text-on-surface-variant">
             We only access your public profile information
@@ -152,7 +157,7 @@ function DbStatus({
   if (healthLoading) {
     return (
       <p className="text-xs text-on-surface-variant flex items-center gap-1.5 mt-2">
-        <Database className="w-3.5 h-3.5 animate-pulse" />
+        <Spinner size="sm" />
         Checking database…
       </p>
     )

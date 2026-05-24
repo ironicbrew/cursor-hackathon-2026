@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
+import { LoadingScreen } from '@/components/loading-screen'
 import { Landing } from '@/pages/Landing'
 import { AuthCallback } from '@/pages/AuthCallback'
 import { Onboarding } from '@/pages/Onboarding'
@@ -10,11 +11,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-pulse text-on-surface-variant">Loading...</div>
-      </div>
-    )
+    return <LoadingScreen />
   }
 
   if (!user && !isDemoMode) {
